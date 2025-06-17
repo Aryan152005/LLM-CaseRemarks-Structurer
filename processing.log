@@ -1,0 +1,137 @@
+2025-06-16 09:43:40.044 | ERROR    | __main__:load_ground_truth:18 - Error loading ground truth: [Errno 2] No such file or directory: 'ground_truth/annotations/annotations.json'
+2025-06-16 09:45:31.603 | ERROR    | __main__:load_ground_truth:18 - Error loading ground truth: Expecting value: line 1 column 1 (char 0)
+2025-06-16 09:46:35.667 | ERROR    | __main__:load_ground_truth:18 - Error loading ground truth: 1 validation error for ProcessedOutput
+processing_time
+  Field required [type=missing, input_value={'file_name': 'call_001.t...hildren_involved': 'No'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+2025-06-16 09:46:52.245 | ERROR    | __main__:load_ground_truth:18 - Error loading ground truth: 1 validation error for ProcessedOutput
+processing_time
+  Field required [type=missing, input_value={'file_name': 'call_001.t...hildren_involved': 'No'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+2025-06-16 09:47:46.507 | INFO     | __main__:main:48 - Starting text processing...
+2025-06-16 09:47:46.516 | ERROR    | text_processor:_call_llm:27 - Error calling LLM: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:47:46.516 | ERROR    | text_processor:process_text:101 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:47:46.516 | ERROR    | __main__:main:55 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:47:46.519 | ERROR    | text_processor:_call_llm:27 - Error calling LLM: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:47:46.519 | ERROR    | text_processor:process_text:101 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:47:46.519 | ERROR    | __main__:main:55 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:47:46.523 | ERROR    | text_processor:_call_llm:27 - Error calling LLM: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:47:46.523 | ERROR    | text_processor:process_text:101 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:47:46.523 | ERROR    | __main__:main:55 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:47:46.525 | INFO     | __main__:main:62 - Evaluating predictions...
+2025-06-16 09:47:46.525 | INFO     | __main__:main:66 - Creating visualizations...
+2025-06-16 09:47:46.526 | INFO     | __main__:main:69 - Processing complete!
+2025-06-16 09:49:12.089 | INFO     | __main__:main:48 - Starting text processing...
+2025-06-16 09:49:12.097 | ERROR    | text_processor:_call_llm:27 - Error calling LLM: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:49:12.098 | ERROR    | text_processor:process_text:101 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:49:12.098 | ERROR    | __main__:main:55 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:49:12.102 | ERROR    | text_processor:_call_llm:27 - Error calling LLM: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:49:12.102 | ERROR    | text_processor:process_text:101 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:49:12.102 | ERROR    | __main__:main:55 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:49:12.107 | ERROR    | text_processor:_call_llm:27 - Error calling LLM: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:49:12.107 | ERROR    | text_processor:process_text:101 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:49:12.107 | ERROR    | __main__:main:55 - Error processing text: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2025-06-16 09:49:12.109 | INFO     | __main__:main:62 - Evaluating predictions...
+2025-06-16 09:49:12.109 | INFO     | __main__:main:66 - Creating visualizations...
+2025-06-16 09:49:12.109 | INFO     | __main__:main:69 - Processing complete!
+2025-06-16 09:55:03.985 | INFO     | __main__:main:48 - Starting text processing...
+2025-06-16 09:55:23.393 | ERROR    | text_processor:process_text:101 - Error processing text: 1 validation error for ProcessedOutput
+timestamp
+  Input should be a valid datetime [type=datetime_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/datetime_type
+2025-06-16 09:55:23.393 | ERROR    | __main__:main:55 - Error processing text: 1 validation error for ProcessedOutput
+timestamp
+  Input should be a valid datetime [type=datetime_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/datetime_type
+2025-06-16 09:55:33.970 | ERROR    | text_processor:process_text:87 - Failed to parse LLM response as JSON: Expecting property name enclosed in double quotes: line 17 column 5 (char 539)
+2025-06-16 09:55:33.970 | ERROR    | text_processor:process_text:101 - Error processing text: Expecting property name enclosed in double quotes: line 17 column 5 (char 539)
+2025-06-16 09:55:33.970 | ERROR    | __main__:main:55 - Error processing text: Expecting property name enclosed in double quotes: line 17 column 5 (char 539)
+2025-06-16 09:55:43.493 | ERROR    | text_processor:process_text:87 - Failed to parse LLM response as JSON: Expecting property name enclosed in double quotes: line 10 column 33 (char 305)
+2025-06-16 09:55:43.493 | ERROR    | text_processor:process_text:101 - Error processing text: Expecting property name enclosed in double quotes: line 10 column 33 (char 305)
+2025-06-16 09:55:43.494 | ERROR    | __main__:main:55 - Error processing text: Expecting property name enclosed in double quotes: line 10 column 33 (char 305)
+2025-06-16 09:55:43.498 | INFO     | __main__:main:62 - Evaluating predictions...
+2025-06-16 09:55:43.498 | INFO     | __main__:main:66 - Creating visualizations...
+2025-06-16 09:55:43.498 | INFO     | __main__:main:69 - Processing complete!
+2025-06-16 09:56:10.348 | INFO     | __main__:main:48 - Starting text processing...
+2025-06-16 09:56:21.839 | ERROR    | text_processor:process_text:106 - Error processing text: 4 validation errors for ProcessedOutput
+event_type
+  Field required [type=missing, input_value={'description': '', 'exam...ambulance immediately.'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+event_sub_type
+  Field required [type=missing, input_value={'description': '', 'exam...ambulance immediately.'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+state_of_victim
+  Field required [type=missing, input_value={'description': '', 'exam...ambulance immediately.'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+victim_gender
+  Field required [type=missing, input_value={'description': '', 'exam...ambulance immediately.'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+2025-06-16 09:56:21.840 | ERROR    | __main__:main:55 - Error processing text: 4 validation errors for ProcessedOutput
+event_type
+  Field required [type=missing, input_value={'description': '', 'exam...ambulance immediately.'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+event_sub_type
+  Field required [type=missing, input_value={'description': '', 'exam...ambulance immediately.'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+state_of_victim
+  Field required [type=missing, input_value={'description': '', 'exam...ambulance immediately.'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+victim_gender
+  Field required [type=missing, input_value={'description': '', 'exam...ambulance immediately.'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+2025-06-16 09:56:34.932 | ERROR    | text_processor:process_text:91 - Failed to parse LLM response as JSON: Expecting property name enclosed in double quotes: line 17 column 5 (char 518)
+2025-06-16 09:56:34.932 | ERROR    | text_processor:process_text:106 - Error processing text: Expecting property name enclosed in double quotes: line 17 column 5 (char 518)
+2025-06-16 09:56:34.932 | ERROR    | __main__:main:55 - Error processing text: Expecting property name enclosed in double quotes: line 17 column 5 (char 518)
+2025-06-16 09:56:55.040 | ERROR    | text_processor:process_text:91 - Failed to parse LLM response as JSON: Extra data: line 109 column 1 (char 2181)
+2025-06-16 09:56:55.040 | ERROR    | text_processor:process_text:106 - Error processing text: Extra data: line 109 column 1 (char 2181)
+2025-06-16 09:56:55.040 | ERROR    | __main__:main:55 - Error processing text: Extra data: line 109 column 1 (char 2181)
+2025-06-16 09:56:55.043 | INFO     | __main__:main:62 - Evaluating predictions...
+2025-06-16 09:56:55.043 | INFO     | __main__:main:66 - Creating visualizations...
+2025-06-16 09:56:55.043 | INFO     | __main__:main:69 - Processing complete!
+2025-06-16 09:58:16.830 | INFO     | __main__:main:48 - Starting text processing...
+2025-06-16 09:58:24.353 | ERROR    | text_processor:process_text:104 - Error processing text: 2 validation errors for ProcessedOutput
+state_of_victim
+  Input should be a valid string [type=string_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/string_type
+victim_gender
+  Input should be a valid string [type=string_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/string_type
+2025-06-16 09:58:24.354 | ERROR    | __main__:main:55 - Error processing text: 2 validation errors for ProcessedOutput
+state_of_victim
+  Input should be a valid string [type=string_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/string_type
+victim_gender
+  Input should be a valid string [type=string_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.11/v/string_type
+2025-06-16 09:59:27.844 | INFO     | __main__:main:52 - Starting text processing...
+2025-06-16 09:59:38.305 | INFO     | __main__:main:66 - Evaluating predictions...
+2025-06-16 09:59:38.305 | ERROR    | evaluator:evaluate_batch:115 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'severity'
+2025-06-16 09:59:38.305 | ERROR    | evaluator:evaluate_batch:115 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'severity'
+2025-06-16 09:59:38.306 | ERROR    | evaluator:evaluate_batch:115 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'severity'
+2025-06-16 09:59:38.306 | INFO     | __main__:main:70 - Creating visualizations...
+2025-06-16 09:59:38.306 | INFO     | __main__:main:73 - Processing complete!
+2025-06-16 10:02:21.497 | INFO     | __main__:main:52 - Starting text processing...
+2025-06-16 10:02:31.247 | INFO     | __main__:main:66 - Evaluating predictions...
+2025-06-16 10:02:31.247 | ERROR    | evaluator:evaluate_batch:115 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'description'
+2025-06-16 10:02:31.248 | ERROR    | evaluator:evaluate_batch:115 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'description'
+2025-06-16 10:02:31.248 | ERROR    | evaluator:evaluate_batch:115 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'description'
+2025-06-16 10:02:31.248 | INFO     | __main__:main:70 - Creating visualizations...
+2025-06-16 10:02:31.248 | INFO     | __main__:main:73 - Processing complete!
+2025-06-16 10:05:45.360 | INFO     | __main__:main:52 - Starting text processing...
+2025-06-16 10:05:55.200 | INFO     | __main__:main:66 - Evaluating predictions...
+2025-06-16 10:05:55.200 | ERROR    | evaluator:evaluate_batch:115 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'location'
+2025-06-16 10:05:55.200 | ERROR    | evaluator:evaluate_batch:115 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'location'
+2025-06-16 10:05:55.200 | ERROR    | evaluator:evaluate_batch:115 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'location'
+2025-06-16 10:05:55.200 | INFO     | __main__:main:70 - Creating visualizations...
+2025-06-16 10:05:55.200 | INFO     | __main__:main:73 - Processing complete!
+2025-06-16 10:06:59.256 | INFO     | __main__:main:52 - Starting text processing...
+2025-06-16 10:07:08.670 | INFO     | __main__:main:66 - Evaluating predictions...
+2025-06-16 10:07:08.670 | ERROR    | evaluator:evaluate_batch:104 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'keywords'
+2025-06-16 10:07:08.670 | ERROR    | evaluator:evaluate_batch:104 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'keywords'
+2025-06-16 10:07:08.670 | ERROR    | evaluator:evaluate_batch:104 - Error evaluating prediction: 'ProcessedOutput' object has no attribute 'keywords'
+2025-06-16 10:07:08.670 | INFO     | __main__:main:70 - Creating visualizations...
+2025-06-16 10:07:08.670 | INFO     | __main__:main:73 - Processing complete!
+2025-06-16 10:08:21.537 | INFO     | __main__:main:52 - Starting text processing...
+2025-06-16 10:08:32.521 | INFO     | __main__:main:66 - Evaluating predictions...
+2025-06-16 10:08:32.521 | INFO     | __main__:main:70 - Creating visualizations...
+2025-06-16 10:08:33.105 | INFO     | __main__:main:73 - Processing complete!
