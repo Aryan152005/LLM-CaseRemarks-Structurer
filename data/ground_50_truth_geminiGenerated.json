@@ -879,7 +879,7 @@
       "file_name": "audio46_truth",
       "event_info_text": "hello I saw a car like abandoned on the side of the road it looks like it was there for days its a silver Maruti 800 with flat tires this is on the highway near the toll plaza before Shivpuri",
       "event_type": "OTHERS",
-      "event_sub_type": "ABANDONED VEHICLES",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "not applicable",
       "victim_gender": "not applicable",
       "specified_matter": "Abandoned silver Maruti 800 car with flat tires on the highway near the toll plaza before Shivpuri, appears to have been there for days.",
@@ -899,7 +899,7 @@
       "mode_of_threat": "none",
       "need_ambulance": "no",
       "children_involved": "no",
-      "generated_event_sub_type_detail": "STRAY ANIMALS"
+      "generated_event_sub_type_detail": "ABANDONED VEHICLES"
     },
     {
       "file_name": "audio47_truth",
@@ -1105,7 +1105,7 @@
       "file_name": "audio55_truth",
       "event_info_text": "hello I saw a woman trying to sell like some suspicious looking packets to young kids near the school gate it looked like drugs to me this is the primary school gate in Saraswati Vihar around 3 PM",
       "event_type": "OTHERS",
-      "event_sub_type": "SALE OF CONTRABANDS",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "not specified",
       "victim_gender": "not specified",
       "specified_matter": "Woman attempting to sell suspicious packets (suspected drugs) to young kids near the primary school gate in Saraswati Vihar around 3 PM.",
@@ -1124,7 +1124,8 @@
       "offender_relation": "stranger",
       "mode_of_threat": "none (contraband sales)",
       "need_ambulance": "no",
-      "children_involved": "yes (potential buyers)"
+      "children_involved": "yes (potential buyers)",
+      "generated_event_sub_type_detail": "SALE OF CONTRABANDS"
     },
     {
       "file_name": "audio56_truth",
@@ -1155,7 +1156,7 @@
       "file_name": "audio57_truth",
       "event_info_text": "sir I need help theres a very aggressive stray dog here it just bit a child on the leg the child is crying and bleeding this is near the park entrance in Ashok Vihar",
       "event_type": "OTHERS",
-      "event_sub_type": "OTHERS: Dog Bite",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "Injured Distressed",
       "victim_gender": "not specified",
       "specified_matter": "Aggressive stray dog bit a child on the leg near the park entrance in Ashok Vihar. Child is crying and bleeding.",
@@ -1174,7 +1175,8 @@
       "offender_relation": "stray animal",
       "mode_of_threat": "animal attack",
       "need_ambulance": "yes",
-      "children_involved": "yes (victim)"
+      "children_involved": "yes (victim)",
+      "generated_event_sub_type_detail": "DOG BITE"
     },
     {
       "file_name": "audio58_truth",
@@ -1229,8 +1231,8 @@
     {
       "file_name": "audio60_truth",
       "event_info_text": "hello police I'm at the railway station and someone just tried to snatch my bag I fought him off but he ran away this is platform number 3 at Central Railway Station my train is about to leave",
-      "event_type": "OTHERS",
-      "event_sub_type": "RAILWAY",
+      "event_type": "THEFT & BURGLARY",
+      "event_sub_type": "THEFT",
       "state_of_victim": "Distressed",
       "victim_gender": "not specified",
       "specified_matter": "Attempted bag snatching on Platform 3 at Central Railway Station. Caller fought off attacker who then fled.",
@@ -1249,7 +1251,8 @@
       "offender_relation": "stranger",
       "mode_of_threat": "attempted snatching",
       "need_ambulance": "no",
-      "children_involved": "no"
+      "children_involved": "no",
+      "generated_event_sub_type_detail": "not_specified"
     },
     {
       "file_name": "audio61_truth",
@@ -1430,7 +1433,7 @@
       "file_name": "audio68_truth",
       "event_info_text": "hello police control there's a person like lying on the railway tracks near the bridge I think he's injured its very dangerous there this is near the railway bridge crossing on GT Road",
       "event_type": "OTHERS",
-      "event_sub_type": "RAILWAY",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "Injured",
       "victim_gender": "male",
       "specified_matter": "Injured person lying on railway tracks near the bridge crossing on GT Road, very dangerous.",
@@ -1449,7 +1452,8 @@
       "offender_relation": "not applicable",
       "mode_of_threat": "none (accident/situation)",
       "need_ambulance": "yes",
-      "children_involved": "no"
+      "children_involved": "no",
+      "generated_event_sub_type_detail": "RAILWAY INJURY"
     },
     {
       "file_name": "audio69_truth",
@@ -1480,7 +1484,7 @@
       "file_name": "audio70_truth",
       "event_info_text": "hello police my wallet was lost somewhere between the bank and my home I had like all my cards and some cash I dont know where I dropped it I was at SBI Bank and walked home to City Apartments",
       "event_type": "OTHERS",
-      "event_sub_type": "OTHERS: Lost Property",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "Distressed",
       "victim_gender": "not specified",
       "specified_matter": "Wallet containing cards and cash lost between SBI Bank and City Apartments.",
@@ -1499,7 +1503,9 @@
       "offender_relation": "not applicable",
       "mode_of_threat": "none",
       "need_ambulance": "no",
-      "children_involved": "no"
+      "children_involved": "no",
+      "generated_event_sub_type_detail": "LOST PURSE"
+      
     },
     {
       "file_name": "audio71_truth",
@@ -1680,7 +1686,7 @@
       "file_name": "audio78_truth",
       "event_info_text": "hello control room I found a lost mobile phone lying on the park bench its a Samsung phone and its unlocked This is City Park near the main entrance",
       "event_type": "OTHERS",
-      "event_sub_type": "OTHERS: Found Property",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "not applicable",
       "victim_gender": "not applicable",
       "specified_matter": "Lost Samsung mobile phone found unlocked on a park bench near the main entrance of City Park.",
@@ -1699,7 +1705,8 @@
       "offender_relation": "not applicable",
       "mode_of_threat": "none",
       "need_ambulance": "no",
-      "children_involved": "no"
+      "children_involved": "no",
+      "generated_event_sub_type_detail": "FOUND MOBILE PHONE"
     },
     {
       "file_name": "audio79_truth",
@@ -1905,7 +1912,7 @@
       "file_name": "audio87_truth",
       "event_info_text": "madam Im calling about a cyber crime I received a scam call saying my bank account will be frozen if I dont transfer money I almost did it but then I got suspicious",
       "event_type": "OTHERS",
-      "event_sub_type": "CYBER CRIME",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "Distressed",
       "victim_gender": "not specified",
       "specified_matter": "Caller received a scam call threatening bank account freezing if money not transferred. Caller became suspicious.",
@@ -1924,13 +1931,14 @@
       "offender_relation": "scammer",
       "mode_of_threat": "fraudulent threat",
       "need_ambulance": "no",
-      "children_involved": "no"
+      "children_involved": "no",
+      "generated_event_sub_type_detail": "CYBER CRIME"
     },
     {
       "file_name": "audio88_truth",
       "event_info_text": "hello police I saw a dead dog lying on the roadside it looks like it was hit by a car its bleeding heavily this is on Airport Road near the signal",
       "event_type": "OTHERS",
-      "event_sub_type": "OTHERS: Animal Deceased",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "Deceased",
       "victim_gender": "not applicable",
       "specified_matter": "Dead dog found bleeding heavily on Airport Road near the signal, appears to have been hit by a car.",
@@ -1949,7 +1957,8 @@
       "offender_relation": "not applicable",
       "mode_of_threat": "none",
       "need_ambulance": "no",
-      "children_involved": "no"
+      "children_involved": "no",
+      "generated_event_sub_type_detail": "ANIMAL DECEASED"
     },
     {
       "file_name": "audio89_truth",
@@ -2955,7 +2964,7 @@
       "file_name": "audio129_truth",
       "event_info_text": "hello police I saw a vehicle like a car hit a stray dog very badly and just drove away the dog is injured and suffering this is near the main road signal on Ring Road",
       "event_type": "OTHERS",
-      "event_sub_type": "OTHERS: Animal Cruelty",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "Injured Critical",
       "victim_gender": "not applicable",
       "specified_matter": "Car hit a stray dog badly near the main road signal on Ring Road and drove away. Dog is injured and suffering.",
@@ -2974,7 +2983,8 @@
       "offender_relation": "stranger",
       "mode_of_threat": "animal cruelty hit and run",
       "need_ambulance": "no (animal welfare needed)",
-      "children_involved": "no"
+      "children_involved": "no",
+      "generated_event_sub_type_detail": "ANIMAL CRUELTY"
     },
     {
       "file_name": "audio130_truth",
@@ -3130,7 +3140,7 @@
       "file_name": "audio136_truth",
       "event_info_text": "sir my wallet it was like lost somewhere around the park I had my driving license and credit cards it just disappeared I was in City Park near the lake",
       "event_type": "OTHERS",
-      "event_sub_type": "OTHERS: Lost Property",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "Distressed",
       "victim_gender": "male",
       "specified_matter": "Wallet containing driving license and credit cards lost somewhere around City Park near the lake.",
@@ -3149,7 +3159,8 @@
       "offender_relation": "not applicable",
       "mode_of_threat": "none",
       "need_ambulance": "no",
-      "children_involved": "no"
+      "children_involved": "no",
+      "generated_event_sub_type_detail": "LOST WALLET"
     },
     {
       "file_name": "audio137_truth",
@@ -3430,7 +3441,7 @@
       "file_name": "audio148_truth",
       "event_info_text": "hello police I found a suspicious bag abandoned at the bus stop its been there for a long time and no one is claiming it this is the main bus stop near the market",
       "event_type": "OTHERS",
-      "event_sub_type": "OTHERS: Found Suspicious Item",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "not applicable",
       "victim_gender": "not applicable",
       "specified_matter": "Suspicious bag abandoned at the main bus stop near the market for a long time, unclaimed.",
@@ -3449,7 +3460,8 @@
       "offender_relation": "not applicable",
       "mode_of_threat": "none",
       "need_ambulance": "no",
-      "children_involved": "no"
+      "children_involved": "no",
+      "generated_event_sub_type_detail": "FOUND SUSPECIOUS ITEM"
     },
     {
       "file_name": "audio149_truth",
@@ -3555,7 +3567,7 @@
       "file_name": "audio153_truth",
       "event_info_text": "madam Im calling about a missing dog it's a small brown poodle with a red leash its been missing since morning from our home in Green Valley",
       "event_type": "OTHERS",
-      "event_sub_type": "OTHERS: Stray Animal",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "Distressed",
       "victim_gender": "not applicable",
       "specified_matter": "Small brown poodle with a red leash missing since morning from home in Green Valley.",
@@ -3574,7 +3586,8 @@
       "offender_relation": "not applicable",
       "mode_of_threat": "none",
       "need_ambulance": "no",
-      "children_involved": "no"
+      "children_involved": "no",
+      "generated_event_sub_type_detail": "STRAY ANIMALS"
     },
     {
       "file_name": "audio154_truth",
@@ -3655,7 +3668,7 @@
       "file_name": "audio157_truth",
       "event_info_text": "hello police I need an ambulance for a person who's been hit by a train near the railway station he's lying on the tracks and bleeding this is near the main railway station",
       "event_type": "OTHERS",
-      "event_sub_type": "RAILWAY",
+      "event_sub_type": "OTHERS",
       "state_of_victim": "Injured Critical",
       "victim_gender": "male",
       "specified_matter": "Person hit by a train near the main railway station, lying on tracks and bleeding.",
@@ -3674,7 +3687,8 @@
       "offender_relation": "not applicable",
       "mode_of_threat": "none",
       "need_ambulance": "yes",
-      "children_involved": "no"
+      "children_involved": "no",
+      "generated_event_sub_type_detail": "RAILWAY HAZARDS"
     },
     {
       "file_name": "audio158_truth",

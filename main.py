@@ -60,7 +60,7 @@ def main():
     visualizer = Visualizer()
     
     # Process all text files in the data directory
-    data_folder = "data/input_eng" # This path should exist and contain your .txt files
+    data_folder = "data/ground_truth_hin" # This path should exist and contain your .txt files
     predictions = []
     
     if not os.path.exists(data_folder):
@@ -91,14 +91,14 @@ def main():
         return
 
     # Save predictions
-    save_predictions(predictions, "output")
+    save_predictions(predictions, "hindi_output_10_hermes")
     
     # Evaluate predictions
     evaluation_results = evaluator.evaluate_predictions(predictions)
-    evaluator.save_evaluation_results(evaluation_results, "output/evaluation_results.json")
+    evaluator.save_evaluation_results(evaluation_results, "hindi_output_10_hermes/evaluation_results.json")
     
     # Create visualizations
-    visualizer.create_visualizations(evaluation_results, "output/visualizations")
+    visualizer.create_visualizations(evaluation_results, "hindi_output_10_hermes/visualizations")
 
 if __name__ == "__main__":
     main()

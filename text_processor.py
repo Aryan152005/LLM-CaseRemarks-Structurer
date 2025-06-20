@@ -139,7 +139,7 @@ def get_few_shot_examples_str():
 class TextProcessor:
     def __init__(self, ollama_base_url: str = "http://localhost:11434"):
         self.ollama_base_url = ollama_base_url
-        self.model_name = "llama3.1:8b" # Or whatever model you are using
+        self.model_name = "spooknik/hermes-2-pro-mistral-7b:latest" # Or whatever model you are using
         self.allowed_event_types = FIELD_VALUE_SCHEMA["event_type"]
         self.allowed_event_sub_types = ALL_EVENT_SUB_TYPES
         

@@ -7,26 +7,31 @@ import json
 from pathlib import Path
 from loguru import logger
 import os
-import re # Import regex for dynamic column identification
-import shutil # For cleaning up test directory
+import re
+import shutil
 
 # Remove existing handlers to avoid duplicate output if running multiple times in a session
 logger.remove()
 # Add a new handler with the desired level (e.g., "INFO" or "DEBUG")
-logger.add(lambda msg: print(msg)) # Changed level to INFO
+logger.add(lambda msg: print(msg))
 
 class Visualizer:
     def __init__(self, output_dir: str = "visualizations"):
-        self.output_dir = Path(output_dir)
-        # Ensure the base output directory exists. Use parents=True for nested paths.
-        self.output_dir.mkdir(exist_ok=True, parents=True)
+        self.base_output_dir = Path(output_dir) # Renamed to clearly indicate base directory
+        self.base_output_dir.mkdir(exist_ok=True, parents=True)
+        self.current_plot_dir = self.base_output_dir # This will be updated based on plot type
         plt.style.use('default')
         sns.set_palette("husl")
+
+    def _set_plot_directory(self, subdirectory: str):
+        """Sets the current directory where plots will be saved."""
+        self.current_plot_dir = self.base_output_dir / subdirectory
+        self.current_plot_dir.mkdir(exist_ok=True, parents=True)
 
     def _save_plot(self, filename: str):
         """Save the current plot to the configured output directory."""
         plt.tight_layout()
-        save_path = self.output_dir / filename
+        save_path = self.current_plot_dir / filename # Use current_plot_dir
         try:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             logger.debug(f"Plot saved to {save_path}")
@@ -37,108 +42,140 @@ class Visualizer:
 
     def plot_categorical_metrics(self, metrics: Dict[str, Any]):
         """Plot categorical metrics (accuracy) using bar and pie charts."""
-        categorical_data = metrics.get('categorical_metrics', {})
-        if not categorical_data:
-            logger.warning("No categorical metrics to plot.")
-            return
+        self._set_plot_directory("categorical_metrics") # Set subdirectory for these plots
 
-        fields = list(categorical_data.keys())
-        accuracies = [data['accuracy'] for data in categorical_data.values() if 'accuracy' in data]
+        # Adjusted to handle the new flat structure
+        # We need to explicitly find accuracy metrics by name pattern
+        accuracy_metrics = {}
+        for key, value in metrics.items():
+            if 'accuracy' in key:
+                # Exclude specific comparison metrics if they are only for _plot_event_accuracy_comparison
+                if 'event_type_' in key or 'event_sub_type_' in key or 'severity_' in key or 'victim_gender_' in key or 'state_of_victim_' in key:
+                    accuracy_metrics[key] = value
+
+        if not accuracy_metrics:
+            logger.warning("No categorical accuracy metrics to plot (excluding comparison metrics for this specific function).")
+            return
+        
+        # Prepare data for plotting (e.g., 'event_type_accuracy' -> 'Event Type Accuracy')
+        fields = [key.replace('_', ' ').title() for key in accuracy_metrics.keys()]
+        accuracies = list(accuracy_metrics.values())
 
         if not fields or not accuracies:
             logger.warning("No fields or accuracies found for categorical metrics to plot.")
             return
         
-        logger.info(f"Plotting categorical metrics for fields: {fields}")
+        logger.info(f"Plotting general categorical metrics: {fields}")
 
         # Bar Chart for Accuracies
         plt.figure(figsize=(12, 6))
         bars = plt.bar(fields, accuracies, color=sns.color_palette("husl", len(fields)))
-        plt.title('Accuracy by Field', fontsize=14, pad=20)
+        plt.title('Overall Categorical Accuracy by Field', fontsize=14, pad=20)
         plt.xlabel('Field', fontsize=12)
         plt.ylabel('Accuracy', fontsize=12)
-        plt.ylim(0, 1) # Accuracies are bounded by 0 and 1
+        plt.ylim(0, 1)
         plt.xticks(rotation=45, ha='right')
         for bar in bars:
             height = bar.get_height()
             plt.text(bar.get_x() + bar.get_width()/2., height,
                              f'{height:.2f}',
                              ha='center', va='bottom')
-        self._save_plot('categorical_metrics_bar.png')
+        self._save_plot('overall_categorical_metrics_bar.png')
 
         # Pie Chart for Proportional Accuracy
         if accuracies and sum(accuracies) > 0:
             plt.figure(figsize=(9, 9))
             plt.pie(accuracies, labels=fields, autopct='%1.1f%%', startangle=90,
                              colors=sns.color_palette("husl", len(fields)))
-            plt.title('Proportion of Accuracy Across Fields', fontsize=14, pad=20)
-            self._save_plot('categorical_metrics_pie.png')
+            plt.title('Proportion of Overall Categorical Accuracy Across Fields', fontsize=14, pad=20)
+            self._save_plot('overall_categorical_metrics_pie.png')
         else:
-            logger.warning("Sum of accuracies is zero or no accuracies, skipping pie chart.")
+            logger.warning("Sum of accuracies is zero or no accuracies, skipping overall categorical pie chart.")
 
     def plot_text_similarity_metrics(self, metrics: Dict[str, Any]):
         """Plot text similarity metrics using bar and line charts."""
-        text_data = metrics.get('text_similarity_metrics', {})
-        if not text_data:
-            logger.warning("No text similarity metrics to plot.")
-            return
+        self._set_plot_directory("text_similarity_metrics") # Set subdirectory
 
-        fields = []
-        similarities = []
-        stds = []
-
-        for field, data in text_data.items():
-            mean_sim = data.get('mean_cosine_similarity')
-            std_sim = data.get('std_cosine_similarity')
-            if mean_sim is not None and std_sim is not None:
-                fields.append(field)
-                similarities.append(mean_sim)
-                stds.append(std_sim)
-            else:
-                logger.warning(f"Skipping text similarity plot for {field}: Missing mean or std cosine similarity.")
-
-        if not fields:
-            logger.warning("No valid fields found for text similarity metrics to plot.")
-            return
+        # Adjusted to handle the new flat structure
+        # Look for keys ending with '_jaccard_mean', '_bleu_mean', '_rouge_1_mean', etc.
+        # This function should probably focus on mean_cosine_similarity or a generic 'mean similarity' if that's what's available
+        # Given the new `aggregate_metrics.json`, it looks like everything is by field_metric_mean.
+        # This function should probably average across all fields for a given metric (e.g., average jaccard across all fields).
+        # Or, it should display per-field average for a specific type of similarity (e.g., mean Jaccard for each text field).
         
-        logger.info(f"Plotting text similarity metrics for fields: {fields}")
+        # Let's try to aggregate all 'mean' values that are not accuracies or processing times
+        # and not explicitly handled by rouge/jaccard/llm specific plots
+        
+        general_similarity_means = {}
+        for key, value in metrics.items():
+            if '_mean' in key and 'accuracy' not in key and 'processing_time' not in key:
+                # Exclude specific rouge/jaccard/llm for the "overall" view this function implies
+                # This makes it a bit tricky, let's refine its purpose for the new data.
+                # Perhaps this function should iterate over specific "metric types" and plot their means across fields.
 
+                # Let's focus this method on a broader "text similarity mean" if that's the intention.
+                # Given the specific new structure, it seems more direct to plot specific metric types per field.
 
-        # Bar Chart with Error Bars for Mean Cosine Similarity
-        plt.figure(figsize=(12, 6))
-        bars = plt.bar(fields, similarities, yerr=stds, capsize=5, color=sns.color_palette("husl", len(fields)))
-        plt.title('Mean Cosine Similarity by Field', fontsize=14, pad=20)
+                # Re-thinking: The previous sample had 'mean_cosine_similarity'. The new one has 'field_jaccard_mean'.
+                # This function might be better repurposed to show MEAN JACCARD/BLEU/ROUGE/LLM across ALL applicable fields.
+                # Or, if that's too complex given the flat structure, we can skip it,
+                # as _create_detailed_plots_from_df's bar chart and individual plots
+                # might cover this adequately.
+
+                # For now, let's keep it but adapt its data collection.
+                # Collect average similarity scores for various text fields.
+                # This will extract 'specified_matter_jaccard_mean' -> 'specified_matter' for 'jaccard'
+                
+                match = re.match(r'(.+)_(jaccard|bleu|rouge_1|rouge_2|rouge_l|llm_similarity)_mean$', key)
+                if match:
+                    field_name = match.group(1).replace('_', ' ').title()
+                    metric_type = match.group(2).replace('_', ' ').title()
+                    
+                    if field_name not in general_similarity_means:
+                        general_similarity_means[field_name] = {}
+                    general_similarity_means[field_name][metric_type] = value
+        
+        if not general_similarity_means:
+            logger.warning("No general text similarity mean metrics found to plot.")
+            return
+
+        logger.info("Plotting general text similarity metrics.")
+
+        # Let's plot average Jaccard, Bleu, Rouge_1, Rouge_2, Rouge_L, LLM Similarity across all text fields.
+        # This requires pivotting the data.
+        plot_data = []
+        for field, metrics_dict in general_similarity_means.items():
+            for metric, value in metrics_dict.items():
+                plot_data.append({'Field': field, 'Metric': metric, 'Value': value})
+        
+        if not plot_data:
+            logger.warning("No data points for general text similarity plotting.")
+            return
+
+        df_plot = pd.DataFrame(plot_data)
+
+        # Grouped Bar Chart
+        plt.figure(figsize=(15, 8))
+        ax = sns.barplot(x='Field', y='Value', hue='Metric', data=df_plot, palette='viridis')
+        plt.title('Average Text Similarity Metrics by Field', fontsize=14, pad=20)
         plt.xlabel('Field', fontsize=12)
-        plt.ylabel('Cosine Similarity', fontsize=12)
-        plt.ylim(0, 1) # Cosine similarity is bounded by 0 and 1
-        plt.xticks(rotation=45, ha='right')
-        for bar in bars:
-            height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2., height,
-                             f'{height:.2f}',
-                             ha='center', va='bottom')
-        self._save_plot('text_similarity_metrics_bar.png')
-
-        # Line Plot for Mean Cosine Similarity
-        plt.figure(figsize=(12, 6))
-        plt.plot(fields, similarities, marker='o', linestyle='-', color=sns.color_palette("husl", 1)[0])
-        plt.title('Mean Cosine Similarity by Field (Trend)', fontsize=14, pad=20)
-        plt.xlabel('Field', fontsize=12)
-        plt.ylabel('Cosine Similarity', fontsize=12)
+        plt.ylabel('Average Score', fontsize=12)
         plt.ylim(0, 1)
         plt.xticks(rotation=45, ha='right')
-        for i, txt in enumerate(similarities):
-            plt.annotate(f'{txt:.2f}', (fields[i], similarities[i]), textcoords="offset points", xytext=(0,10), ha='center')
-        self._save_plot('text_similarity_metrics_line.png')
+        plt.legend(title='Metric Type', bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        self._save_plot('avg_text_similarity_metrics_grouped_bar.png')
+
+        # Line Plot (maybe less useful here if too many metrics/fields)
+        # For simplicity, we might skip the line plot for this aggregated view if it gets too cluttered.
+        # If we wanted it, we'd need to consider what "trend" it represents.
+        # For now, stick to the grouped bar.
 
     def plot_processing_time(self, metrics: Dict[str, Any]):
         """Plot processing time metrics using bar chart and histogram."""
-        processing_data = metrics.get('processing_metrics', {})
-        if not processing_data:
-            logger.warning("No processing time metrics to plot.")
-            return
+        self._set_plot_directory("processing_time_metrics") # Set subdirectory
 
-        mean_processing_time = processing_data.get('mean_processing_time')
+        mean_processing_time = metrics.get('mean_processing_time') # Assuming it's still top-level 'mean_processing_time'
         if mean_processing_time is None:
             logger.warning("Mean processing time not found in metrics.")
             return
@@ -160,136 +197,134 @@ class Visualizer:
         self._save_plot('processing_time_bar.png')
 
         # Histogram for Individual Processing Times (if available)
-        individual_times = processing_data.get('individual_processing_times', [])
-        if individual_times:
-            # Ensure individual_times are numeric before plotting histogram
-            numeric_individual_times = pd.to_numeric(individual_times, errors='coerce').dropna()
-            if not numeric_individual_times.empty:
-                plt.figure(figsize=(10, 6))
-                sns.histplot(numeric_individual_times, kde=True, bins=10, color=sns.color_palette("husl", 1)[0])
-                plt.title('Distribution of Individual Processing Times', fontsize=14, pad=20)
-                plt.xlabel('Time (seconds)', fontsize=12)
-                plt.ylabel('Frequency', fontsize=12)
-                self._save_plot('processing_time_distribution_hist.png')
-            else:
-                logger.warning("Individual processing times are not numeric or are empty after conversion.")
-        else:
-            logger.warning("Individual processing times not found in metrics for histogram.")
+        # This data comes from 'detailed_results' typically, not 'aggregate_metrics'
+        # So this part should be moved to a detailed plot method.
+        # For now, commenting out as it assumes a different data source than 'metrics' dict
+        # individual_times = metrics.get('individual_processing_times', [])
+        # if individual_times:
+        #     numeric_individual_times = pd.to_numeric(individual_times, errors='coerce').dropna()
+        #     if not numeric_individual_times.empty:
+        #         plt.figure(figsize=(10, 6))
+        #         sns.histplot(numeric_individual_times, kde=True, bins=10, color=sns.color_palette("husl", 1)[0])
+        #         plt.title('Distribution of Individual Processing Times', fontsize=14, pad=20)
+        #         plt.xlabel('Time (seconds)', fontsize=12)
+        #         plt.ylabel('Frequency', fontsize=12)
+        #         self._save_plot('processing_time_distribution_hist.png')
+        #     else:
+        #         logger.warning("Individual processing times are not numeric or are empty after conversion.")
+        # else:
+        #     logger.warning("Individual processing times not found in metrics for histogram.")
+
 
     def plot_rouge_scores(self, metrics: Dict[str, Any]):
         """Plot ROUGE scores using grouped bar and line charts."""
-        text_data = metrics.get('text_similarity_metrics', {})
-        if not text_data:
-            logger.warning("No ROUGE scores to plot from text similarity metrics.")
-            return
+        self._set_plot_directory("rouge_metrics") # Set subdirectory
 
-        rouge_scores = {
-            'ROUGE-1': [],
-            'ROUGE-2': [],
-            'ROUGE-L': []
-        }
-
-        fields_with_rouge_data = []
-        for field, field_data in text_data.items():
-            rouge_data = field_data.get('rouge_scores', {})
-            r1 = rouge_data.get('rouge1')
-            r2 = rouge_data.get('rouge2')
-            rL = rouge_data.get('rougeL')
-
-            if r1 is not None or r2 is not None or rL is not None:
-                fields_with_rouge_data.append(field)
-                rouge_scores['ROUGE-1'].append(r1 if r1 is not None else 0)
-                rouge_scores['ROUGE-2'].append(r2 if r2 is not None else 0)
-                rouge_scores['ROUGE-L'].append(rL if rL is not None else 0)
-            else:
-                logger.debug(f"No ROUGE scores found for field: {field}. Skipping for ROUGE plots.")
+        rouge_data_by_field = {}
+        # Iterate through metrics to find ROUGE scores like 'field_rouge_1_mean'
+        for key, value in metrics.items():
+            match = re.match(r'(.+)_(rouge_1|rouge_2|rouge_l)_mean$', key)
+            if match:
+                field_name = match.group(1).replace('_', ' ').title()
+                rouge_type = match.group(2).replace('_', ' ').upper()
+                if field_name not in rouge_data_by_field:
+                    rouge_data_by_field[field_name] = {}
+                rouge_data_by_field[field_name][rouge_type] = value
         
-        fields = fields_with_rouge_data # Update fields to only include those with data
-        if not fields:
-            logger.warning("No fields with ROUGE data found to plot.")
+        if not rouge_data_by_field:
+            logger.warning("No ROUGE scores to plot from aggregate metrics.")
             return
         
+        fields = list(rouge_data_by_field.keys())
+        rouge_types = ['ROUGE-1', 'ROUGE-2', 'ROUGE-L'] # Consistent order
+
+        # Prepare data for plotting
+        plot_data = []
+        for field in fields:
+            for rouge_type in rouge_types:
+                score = rouge_data_by_field[field].get(rouge_type, 0) # Default to 0 if missing
+                plot_data.append({'Field': field, 'ROUGE Type': rouge_type, 'Score': score})
+        
+        df_plot = pd.DataFrame(plot_data)
+
         logger.info(f"Plotting ROUGE scores for fields: {fields}")
-
-
-        x = np.arange(len(fields))
-        width = 0.25
 
         # Grouped Bar Chart for ROUGE Scores
         plt.figure(figsize=(14, 7))
-        colors = sns.color_palette("husl", len(rouge_scores))
-        for i, (metric, scores) in enumerate(rouge_scores.items()):
-            bars = plt.bar(x + i*width, scores, width, label=metric, color=colors[i])
-            for bar in bars:
-                height = bar.get_height()
-                plt.text(bar.get_x() + bar.get_width()/2., height,
-                                     f'{height:.2f}',
-                                     ha='center', va='bottom', fontsize=8)
+        ax = sns.barplot(x='Field', y='Score', hue='ROUGE Type', data=df_plot, palette='viridis')
         plt.title('ROUGE Scores by Field', fontsize=14, pad=20)
         plt.xlabel('Field', fontsize=12)
         plt.ylabel('Score', fontsize=12)
-        plt.xticks(x + width, fields, rotation=45, ha='right')
-        plt.legend(fontsize=10)
-        plt.ylim(0, 1) # ROUGE scores are bounded by 0 and 1
+        plt.xticks(rotation=45, ha='right')
+        plt.legend(title='ROUGE Type')
+        plt.ylim(0, 1)
+        # Add labels to bars
+        for container in ax.containers:
+            ax.bar_label(container, fmt='%.2f', fontsize=8)
         self._save_plot('rouge_scores_grouped_bar.png')
 
         # Line Plot for ROUGE Scores
         plt.figure(figsize=(14, 7))
-        for metric, scores in rouge_scores.items():
-            plt.plot(fields, scores, marker='o', linestyle='-', label=metric)
-            for i, txt in enumerate(scores):
-                plt.annotate(f'{txt:.2f}', (fields[i], scores[i]), textcoords="offset points", xytext=(0,10), ha='center', fontsize=8)
+        sns.lineplot(x='Field', y='Score', hue='ROUGE Type', data=df_plot, marker='o', palette='viridis')
         plt.title('ROUGE Scores by Field (Trend)', fontsize=14, pad=20)
         plt.xlabel('Field', fontsize=12)
         plt.ylabel('Score', fontsize=12)
         plt.xticks(rotation=45, ha='right')
-        plt.legend(fontsize=10)
+        plt.legend(title='ROUGE Type')
         plt.ylim(0, 1)
         self._save_plot('rouge_scores_line.png')
 
     def plot_keyword_similarity(self, metrics: Dict[str, Any]):
         """Plot keyword similarity metrics using a bar chart."""
-        keyword_data = metrics.get('set_similarity_metrics', {}).get('keywords', {})
-        if not keyword_data:
-            logger.warning("No keyword similarity metrics to plot.")
-            return
+        self._set_plot_directory("set_similarity_metrics") # Set subdirectory
 
-        similarity = keyword_data.get('mean_jaccard_similarity')
-        std = keyword_data.get('std_jaccard_similarity')
+        # Dynamically find mean Jaccard for any 'jaccard_mean' that might represent sets (like keywords)
+        # This will need to be flexible. For now, let's assume one main "set similarity"
+        # based on the example 'specified_matter_jaccard_mean' or 'keywords_jaccard_mean'
+        
+        # We need to find all keys ending in '_jaccard_mean' and process them.
+        jaccard_means = {}
+        for key, value in metrics.items():
+            if key.endswith('_jaccard_mean'):
+                field_name = key.replace('_jaccard_mean', '').replace('_', ' ').title()
+                jaccard_means[field_name] = value
 
-        if similarity is None or std is None:
-            logger.warning("Mean or standard deviation for Jaccard similarity not found.")
+        if not jaccard_means:
+            logger.warning("No Jaccard similarity metrics (ending with '_jaccard_mean') to plot.")
             return
         
-        logger.info("Plotting keyword similarity metrics.")
+        logger.info("Plotting Jaccard similarity metrics.")
+
+        # Create DataFrame for plotting
+        df_plot = pd.DataFrame(list(jaccard_means.items()), columns=['Field', 'Mean Jaccard Similarity'])
 
         # Bar Chart for Mean Jaccard Similarity
-        plt.figure(figsize=(8, 6))
-        bars = plt.bar(['Keywords'], [similarity], yerr=[std], capsize=5, color=sns.color_palette("husl", 1)[0])
-        plt.title('Keyword Similarity (Mean Jaccard Similarity)', fontsize=14, pad=20)
+        plt.figure(figsize=(10, 6))
+        ax = sns.barplot(x='Field', y='Mean Jaccard Similarity', data=df_plot, hue='Field', palette="husl", legend=False)
+        plt.title('Mean Jaccard Similarity by Field', fontsize=14, pad=20)
         plt.ylabel('Jaccard Similarity', fontsize=12)
-        plt.ylim(0, 1) # Jaccard similarity is bounded by 0 and 1
-        for bar in bars:
-            height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2., height,
-                             f'{height:.2f}',
-                             ha='center', va='bottom')
-        self._save_plot('keyword_similarity_bar.png')
+        plt.ylim(0, 1)
+        plt.xticks(rotation=45, ha='right')
+        for container in ax.containers:
+            ax.bar_label(container, fmt='%.2f')
+        self._save_plot('jaccard_similarity_bar.png')
+
 
     def create_all_visualizations(self, metrics: Dict[str, Any]):
         """Create all aggregate-level visualizations from the metrics."""
+        self._set_plot_directory("aggregate_metrics_summary") # Main folder for aggregate plots
         logger.info("Creating all aggregate-level visualizations.")
         try:
             self.plot_categorical_metrics(metrics)
             self.plot_text_similarity_metrics(metrics)
             self.plot_processing_time(metrics)
             self.plot_rouge_scores(metrics)
-            self.plot_keyword_similarity(metrics)
+            self.plot_keyword_similarity(metrics) # This now handles all Jaccard means
 
             # Save metrics as JSON for reference
-            with open(self.output_dir / 'metrics.json', 'w') as f:
+            with open(self.current_plot_dir / 'aggregate_metrics.json', 'w') as f:
                 json.dump(metrics, f, indent=2)
-            logger.info("Aggregate metrics saved to metrics.json")
+            logger.info(f"Aggregate metrics saved to {self.current_plot_dir / 'aggregate_metrics.json'}")
 
         except Exception as e:
             logger.error(f"Error creating aggregate visualizations: {e}")
@@ -297,13 +332,15 @@ class Visualizer:
 
     def create_visualizations(self, evaluation_results: Dict[str, Any], output_dir: str):
         """Create visualizations for evaluation results (detailed and aggregate)."""
-        original_output_dir = self.output_dir
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(exist_ok=True, parents=True)
-        logger.info(f"Visualizations will be saved to {self.output_dir}")
+        # Store original base directory, then set the new one for this run
+        original_base_output_dir = self.base_output_dir
+        self.base_output_dir = Path(output_dir)
+        self.base_output_dir.mkdir(exist_ok=True, parents=True)
+        logger.info(f"Visualizations will be saved to base directory: {self.base_output_dir}")
 
         try:
             df = pd.DataFrame(evaluation_results.get('detailed_results', []))
+            # Directly use the provided 'aggregate_metrics' dictionary
             metrics = evaluation_results.get('aggregate_metrics', {})
 
             if df.empty:
@@ -312,52 +349,60 @@ class Visualizer:
             if not metrics:
                 logger.warning("Aggregate metrics are empty. Skipping aggregate visualizations.")
             
-            # Call aggregate-level plots using the original methods
+            # Call aggregate-level plots
             if metrics:
-                self.create_all_visualizations(metrics) # This calls all your plot_* methods
+                self.create_all_visualizations(metrics) # This sets its own sub-folders
 
-            # Call detailed-level plots, ensuring they use the correct self.output_dir
+            # Call detailed-level plots, which will also set their own sub-folders
             if not df.empty:
-                self._plot_event_accuracy_comparison(metrics) # Pass metrics as expected by your function
+                # These methods will set their own subdirectories using _set_plot_directory
+                self._plot_event_accuracy_comparison(metrics) # Pass metrics for accurate parsing
                 self._plot_text_similarity_distribution(df)
                 self._plot_llm_similarity_scores(df)
                 self._plot_correlation_heatmap(df)
-                self._plot_processing_time_trend(df) # New plot for processing time trend
-                self._create_detailed_plots_from_df(df) # Renamed to avoid confusion with create_visualizations wrapper
+                self._plot_processing_time_trend(df)
+                self._create_detailed_plots_from_df(df) # Overall bar chart from detailed results mean
 
-            logger.info(f"Visualizations created in {self.output_dir}")
+            logger.info(f"All visualizations created in {self.base_output_dir}")
 
         except Exception as e:
-            logger.error(f"Error creating detailed visualizations: {e}")
+            logger.error(f"Error creating visualizations: {e}")
             raise
         finally:
-            # Restore the original output_dir for subsequent calls if needed
-            self.output_dir = original_output_dir
-
+            # Restore the original base_output_dir for subsequent calls if needed
+            self.base_output_dir = original_base_output_dir
+            self.current_plot_dir = self.base_output_dir # Reset current plot dir
 
     def _plot_event_accuracy_comparison(self, metrics: Dict[str, Any]):
-        """Plot comparison of strict vs fuzzy accuracy for event types and sub-types."""
-        event_type_strict = metrics.get('categorical_metrics', {}).get('event_type', {}).get('accuracy', 0)
-        event_type_fuzzy = metrics.get('categorical_metrics', {}).get('event_type', {}).get('fuzzy_accuracy', 0)
-        event_sub_type_strict = metrics.get('categorical_metrics', {}).get('event_sub_type', {}).get('accuracy', 0)
-        event_sub_type_fuzzy = metrics.get('categorical_metrics', {}).get('event_sub_type', {}).get('fuzzy_accuracy', 0)
+        """
+        Plot comparison of strict vs fuzzy accuracy for event types and sub-types.
+        Now adapted to new flat aggregate_metrics structure.
+        """
+        self._set_plot_directory("categorical_metrics/event_accuracy_comparison") # New subdirectory
 
-        event_metrics = {
-            'Event Type': [event_type_strict, event_type_fuzzy],
-            'Event Sub-type': [event_sub_type_strict, event_sub_type_fuzzy]
-        }
+        event_type_strict = metrics.get('event_type_strict_accuracy')
+        event_type_fuzzy = metrics.get('event_type_fuzzy_accuracy')
+        event_sub_type_strict = metrics.get('event_sub_type_strict_accuracy')
+        event_sub_type_fuzzy = metrics.get('event_sub_type_fuzzy_accuracy')
         
-        df_plot = pd.DataFrame(event_metrics, index=['Strict', 'Fuzzy'])
+        # Filter out None values to ensure only existing metrics are plotted
+        plot_data = []
+        if event_type_strict is not None: plot_data.append({'Metric': 'Event Type', 'Accuracy Type': 'Strict', 'Accuracy': event_type_strict})
+        if event_type_fuzzy is not None: plot_data.append({'Metric': 'Event Type', 'Accuracy Type': 'Fuzzy', 'Accuracy': event_type_fuzzy})
+        if event_sub_type_strict is not None: plot_data.append({'Metric': 'Event Sub-type', 'Accuracy Type': 'Strict', 'Accuracy': event_sub_type_strict})
+        if event_sub_type_fuzzy is not None: plot_data.append({'Metric': 'Event Sub-type', 'Accuracy Type': 'Fuzzy', 'Accuracy': event_sub_type_fuzzy})
+
+        df_plot = pd.DataFrame(plot_data)
         
-        if df_plot.empty or df_plot.isnull().all().all(): # Added check for all nulls
-            logger.warning("No event accuracy metrics found to plot comparison or all values are null.")
+        if df_plot.empty:
+            logger.warning("No event accuracy metrics found to plot comparison or all values are None.")
             return
 
         logger.info("Plotting event accuracy comparison.")
 
         # Bar Chart
         plt.figure(figsize=(10, 6))
-        ax = df_plot.plot(kind='bar', figsize=(10, 6), color=sns.color_palette("husl", df_plot.shape[1]), ax=plt.gca()) # Use gca() for current axes
+        ax = sns.barplot(x='Metric', y='Accuracy', hue='Accuracy Type', data=df_plot, palette="viridis")
         plt.title('Event Type and Sub-type Accuracy Comparison', fontsize=14, pad=20)
         plt.ylabel('Accuracy', fontsize=12)
         plt.ylim(0,1)
@@ -366,22 +411,21 @@ class Visualizer:
             ax.bar_label(container, fmt='%.2f')
         plt.tight_layout()
         self._save_plot('event_accuracy_comparison_bar.png')
-        # plt.close() # Keep this if you don't want to show the plot immediately in an interactive env
 
         # Line chart
         plt.figure(figsize=(10, 6))
-        for col in df_plot.columns:
-            plt.plot(df_plot.index, df_plot[col], marker='o', linestyle='-', label=col)
-            for i, val in enumerate(df_plot[col]):
-                plt.annotate(f'{val:.2f}', (df_plot.index[i], val), textcoords="offset points", xytext=(0,10), ha='center')
+        ax = sns.lineplot(x='Accuracy Type', y='Accuracy', hue='Metric', data=df_plot, marker='o', linestyle='-', palette='viridis')
         plt.title('Event Type and Sub-type Accuracy Comparison (Line Plot)', fontsize=14, pad=20)
         plt.xlabel('Accuracy Type', fontsize=12)
         plt.ylabel('Accuracy', fontsize=12)
         plt.ylim(0,1)
         plt.legend(title='Metric Type')
+        # Add labels to points
+        for i, row in df_plot.iterrows():
+            ax.annotate(f'{row["Accuracy"]:.2f}', (row['Accuracy Type'], row['Accuracy']), 
+                        textcoords="offset points", xytext=(0,10), ha='center')
         plt.tight_layout()
         self._save_plot('event_accuracy_comparison_line.png')
-        # plt.close() # Keep this if you don't want to show the plot immediately in an interactive env
 
     def _plot_text_similarity_distribution(self, df: pd.DataFrame):
         """
@@ -389,6 +433,8 @@ class Visualizer:
         Dynamically identifies text similarity columns.
         Ensures clear boundaries for similarity scores [0, 1].
         """
+        self._set_plot_directory("detailed_distributions/text_similarity") # New subdirectory
+
         # Dynamically identify text similarity columns using regex patterns
         similarity_patterns = {
             'jaccard': r'_jaccard$',
@@ -399,7 +445,7 @@ class Visualizer:
             'llm_similarity': r'_llm_similarity$'
         }
         
-        text_fields_and_metrics = {} # Stores {field: [metrics_present_for_field]}
+        text_fields_and_metrics = {}
 
         for col in df.columns:
             for metric_name, pattern in similarity_patterns.items():
@@ -408,49 +454,49 @@ class Visualizer:
                     if field_name not in text_fields_and_metrics:
                         text_fields_and_metrics[field_name] = []
                     text_fields_and_metrics[field_name].append(metric_name)
-                    break # Move to next column once a pattern is matched
+                    break
 
         if not text_fields_and_metrics:
             logger.warning("No text similarity metrics columns found in DataFrame for detailed distribution plots.")
             return
             
-        logger.info(f"Dynamically identified text similarity metrics for: {text_fields_and_metrics.keys()}")
+        logger.info(f"Dynamically identified text similarity metrics for: {list(text_fields_and_metrics.keys())}")
 
         for field, metrics_list in text_fields_and_metrics.items():
             field_present_metrics_data = [] # To collect data for violin plot
+            
+            # Create a sub-subdirectory for each field's detailed distributions
+            self._set_plot_directory(f"detailed_distributions/text_similarity/{field.replace(' ', '_')}")
             logger.info(f"Plotting detailed text similarity distributions for field: {field}")
 
-            for metric in metrics_list: # Iterate through relevant metrics for this field
+            for metric in metrics_list:
                 col = f"{field}_{metric}"
-                data_to_plot = pd.to_numeric(df[col], errors='coerce').dropna() # Convert to numeric, handle 'not specified'
+                data_to_plot = pd.to_numeric(df[col], errors='coerce').dropna()
 
                 if not data_to_plot.empty:
-                    # Store data for violin plot later
                     for val in data_to_plot:
                         field_present_metrics_data.append({'Metric': metric.replace('_', ' ').upper(), 'Score': val})
 
-                    # KDE plot (with clipping for visual boundary adherence)
                     try:
                         plt.figure(figsize=(10, 5))
                         sns.kdeplot(data=data_to_plot, label=metric.replace('_', ' ').upper(), fill=True, alpha=0.6, clip=(0, 1))
                         plt.title(f'Distribution of {metric.replace("_", " ").upper()} - {field.replace("_", " ").title()} (KDE Plot)', fontsize=14)
                         plt.xlabel('Similarity Score')
                         plt.ylabel('Density')
-                        plt.xlim(0, 1) # Explicitly set x-axis limits
+                        plt.xlim(0, 1)
                         plt.legend()
                         plt.tight_layout()
                         self._save_plot(f"{field}_{metric}_distribution_kde.png")
                     except Exception as e:
                         logger.warning(f"KDE Plot failed for {col}: {e}")
 
-                    # Histogram for individual metric distribution
                     try:
                         plt.figure(figsize=(10, 5))
                         plt.hist(data_to_plot, bins=np.linspace(0, 1, 21), edgecolor='black', alpha=0.7, color=sns.color_palette("husl", 1)[0])
                         plt.title(f'Distribution of {metric.replace("_", " ").upper()} - {field.replace("_", " ").title()} (Histogram)', fontsize=14)
                         plt.xlabel('Similarity Score')
                         plt.ylabel('Frequency')
-                        plt.xlim(0, 1) # Explicitly set x-axis limits
+                        plt.xlim(0, 1)
                         plt.tight_layout()
                         self._save_plot(f"{field}_{metric}_distribution_hist.png")
                     except Exception as e:
@@ -458,7 +504,9 @@ class Visualizer:
                 else:
                     logger.debug(f"Column '{col}' is empty or contains only non-numeric/null values — skipping individual plots.")
 
-            # Violin Plot for combined metric distributions per field
+            # Reset plot directory to the parent for combined plots
+            self._set_plot_directory(f"detailed_distributions/text_similarity/")
+
             if field_present_metrics_data:
                 combined_df = pd.DataFrame(field_present_metrics_data)
                 plt.figure(figsize=(12, 7))
@@ -466,14 +514,13 @@ class Visualizer:
                 plt.title(f'Distribution of Similarity Metrics for {field.replace("_", " ").title()} (Violin Plot)', fontsize=14)
                 plt.xlabel('Metric', fontsize=12)
                 plt.ylabel('Similarity Score', fontsize=12)
-                plt.ylim(0, 1) # Explicitly set y-axis limits for clarity
+                plt.ylim(0, 1)
                 plt.xticks(rotation=45, ha='right')
                 plt.tight_layout()
                 self._save_plot(f"{field}_combined_metrics_distribution_violin.png")
             else:
                 logger.debug(f"No combined metric data for {field} to plot violin plot.")
 
-            # Scatter plot for Jaccard vs LLM Similarity (if both exist)
             jaccard_col = f"{field}_jaccard"
             llm_sim_col = f"{field}_llm_similarity"
             
@@ -481,20 +528,20 @@ class Visualizer:
                 jaccard_data = pd.to_numeric(df[jaccard_col], errors='coerce').dropna()
                 llm_sim_data = pd.to_numeric(df[llm_sim_col], errors='coerce').dropna()
 
-                # Align indices to ensure plotting corresponding values
                 aligned_df = pd.DataFrame({
                     'Jaccard': jaccard_data,
                     'LLMSimilarity': llm_sim_data
-                }).dropna() # Drop rows where either is NaN after alignment
+                }).dropna()
 
                 if not aligned_df.empty:
+                    self._set_plot_directory(f"detailed_distributions/text_similarity/{field.replace(' ', '_')}") # Set back to field's folder
                     plt.figure(figsize=(10, 6))
                     sns.scatterplot(x=aligned_df['Jaccard'], y=aligned_df['LLMSimilarity'], alpha=0.7, color=sns.color_palette("husl", 1)[0])
                     plt.title(f'Jaccard vs LLM Similarity for {field.replace("_", " ").title()} (Scatter Plot)', fontsize=14)
                     plt.xlabel(f'Jaccard Similarity for {field.replace("_", " ").title()}', fontsize=12)
                     plt.ylabel(f'LLM Similarity for {field.replace("_", " ").title()}', fontsize=12)
-                    plt.xlim(0, 1) # Enforce x-axis limits
-                    plt.ylim(0, 1) # Enforce y-axis limits
+                    plt.xlim(0, 1)
+                    plt.ylim(0, 1)
                     plt.tight_layout()
                     self._save_plot(f"{field}_jaccard_vs_llm_similarity_scatter.png")
                 else:
@@ -505,12 +552,13 @@ class Visualizer:
 
     def _plot_llm_similarity_scores(self, df: pd.DataFrame):
         """Plot LLM similarity scores for each text field using bar and pie charts."""
-        # Dynamically identify LLM similarity columns
+        self._set_plot_directory("detailed_distributions/llm_similarity") # New subdirectory
+
         llm_similarity_cols = [col for col in df.columns if col.endswith('_llm_similarity')]
 
         llm_similarity_data = []
         for col_name in llm_similarity_cols:
-            cleaned_llm_data = pd.to_numeric(df[col_name], errors='coerce').dropna() # Convert to numeric, drop NaNs
+            cleaned_llm_data = pd.to_numeric(df[col_name], errors='coerce').dropna()
             if not cleaned_llm_data.empty:
                 field_name = col_name.replace('_llm_similarity', '').replace('_', ' ').title()
                 llm_similarity_data.append({'Field': field_name, 'Average Similarity Score': cleaned_llm_data.mean()})
@@ -524,10 +572,9 @@ class Visualizer:
         logger.info("Plotting LLM similarity scores.")
         mean_df = pd.DataFrame(llm_similarity_data)
 
-        # Bar Plot for Average LLM Similarity
         plt.figure(figsize=(10, 6))
         ax = sns.barplot(x='Field', y='Average Similarity Score', data=mean_df, hue='Field', palette="husl", legend=False)
-        plt.title('Average LLM Similarity Scores by Field', fontsize=14, pad=20)
+        plt.title('Average LLM Similarity Scores by Field (Detailed Results)', fontsize=14, pad=20)
         plt.ylabel('Average Similarity Score', fontsize=12)
         plt.ylim(0,1)
         plt.xticks(rotation=45, ha='right')
@@ -536,12 +583,11 @@ class Visualizer:
         plt.tight_layout()
         self._save_plot('llm_similarity_scores_bar.png')
 
-        # Pie Chart for LLM Similarity Score Proportions
         if not mean_df.empty and mean_df['Average Similarity Score'].sum() > 0:
             plt.figure(figsize=(9, 9))
             plt.pie(mean_df['Average Similarity Score'], labels=mean_df['Field'], autopct='%1.1f%%', startangle=90,
                              colors=sns.color_palette("husl", len(mean_df)))
-            plt.title('Proportion of Average LLM Similarity by Field', fontsize=14, pad=20)
+            plt.title('Proportion of Average LLM Similarity by Field (Detailed Results)', fontsize=14, pad=20)
             plt.tight_layout()
             self._save_plot('llm_similarity_scores_pie.png')
         else:
@@ -550,24 +596,20 @@ class Visualizer:
 
     def _plot_correlation_heatmap(self, df: pd.DataFrame):
         """Plot correlation heatmap of all dynamically identified numeric metrics."""
+        self._set_plot_directory("correlations") # New subdirectory
         df_numeric_for_corr = df.copy()
         
-        # Dynamically identify columns that are likely to be numeric metrics.
-        # This regex catches various accuracy, similarity, and score metrics.
         metric_patterns = r'(accuracy|jaccard|bleu|rouge_\d|rouge_l|llm_similarity|processing_time)$'
         potential_metric_cols = [
             col for col in df_numeric_for_corr.columns 
-            if re.search(metric_patterns, col) or col == 'processing_time' # Include processing_time explicitly if not caught by pattern
+            if re.search(metric_patterns, col) or col == 'processing_time'
         ]
         
-        # Filter df_numeric_for_corr to only include these columns
         df_numeric_for_corr = df_numeric_for_corr[potential_metric_cols]
 
-        # Convert all relevant columns to numeric, coercing errors, then drop NaNs for correlation
         for col in df_numeric_for_corr.columns:
             df_numeric_for_corr[col] = pd.to_numeric(df_numeric_for_corr[col], errors='coerce')
 
-        # Drop columns that are entirely NaN after conversion, or original columns that were completely non-numeric
         numeric_cols_for_corr = [col for col in df_numeric_for_corr.columns if not df_numeric_for_corr[col].dropna().empty]
 
         if not numeric_cols_for_corr:
@@ -592,6 +634,8 @@ class Visualizer:
         Plots the processing time trend over individual records, similar to a stock graph.
         Assumes 'processing_time' column exists in the detailed results DataFrame.
         """
+        self._set_plot_directory("detailed_distributions/processing_time_trend") # New subdirectory
+
         if 'processing_time' not in df.columns:
             logger.warning("Column 'processing_time' not found in detailed results for trend plot.")
             return
@@ -604,7 +648,6 @@ class Visualizer:
         logger.info("Plotting processing time trend (stock-like graph).")
 
         plt.figure(figsize=(14, 7))
-        # Using index as 'time' or 'record number' for a trend
         plt.plot(times.index, times.values, marker='o', linestyle='-', color='skyblue', label='Processing Time per Record')
         plt.title('Processing Time Trend per Record', fontsize=16, pad=20)
         plt.xlabel('Record Index', fontsize=12)
@@ -614,143 +657,166 @@ class Visualizer:
         plt.tight_layout()
         self._save_plot('processing_time_trend.png')
 
+        # Also add a histogram for detailed processing time distribution
+        plt.figure(figsize=(10, 6))
+        sns.histplot(times, kde=True, bins=10, color=sns.color_palette("husl", 1)[0])
+        plt.title('Distribution of Individual Processing Times (Detailed Results)', fontsize=14, pad=20)
+        plt.xlabel('Time (seconds)', fontsize=12)
+        plt.ylabel('Frequency', fontsize=12)
+        self._save_plot('processing_time_distribution_hist.png')
 
-    def _create_detailed_plots_from_df(self, df: pd.DataFrame) -> None: # Renamed this method
+
+    def _create_detailed_plots_from_df(self, df: pd.DataFrame) -> None:
         """
         Create various detailed visualizations from evaluation results using the DataFrame.
-        Dynamically identifies relevant numerical metrics.
+        Dynamically identifies relevant numerical metrics for an overall bar chart from detailed results.
         """
-        # Dynamically identify columns that are numeric and represent metrics.
-        # We can look for patterns that typically denote scores/accuracies.
-        # Exclude 'id' or other non-metric numerical columns if they exist.
+        self._set_plot_directory("detailed_overall_performance") # New subdirectory
+
         metric_keywords = ['accuracy', 'jaccard', 'bleu', 'rouge', 'similarity', 'match', 'score', 'time']
         
-        # Filter for columns that are numeric and likely represent metrics
         numeric_metric_cols = []
         for col in df.columns:
             if any(keyword in col for keyword in metric_keywords):
-                # Attempt to convert to numeric. If it fails for all values, it's not a numeric metric.
                 temp_series = pd.to_numeric(df[col], errors='coerce')
                 if not temp_series.dropna().empty:
                     numeric_metric_cols.append(col)
         
         if not numeric_metric_cols:
-            logger.warning("No valid numeric metric columns found in DataFrame for overall performance plotting.")
+            logger.warning("No valid numeric metric columns found in DataFrame for overall performance plotting from detailed results.")
             return
 
-        logger.info("Creating overall performance metrics bar chart from detailed results.")
-        # 1. Overall Performance Metrics (Bar Chart)
+        logger.info("Creating overall performance metrics bar chart from detailed results (average across records).")
         valid_metrics_data = df[numeric_metric_cols].dropna(how='all')
         if not valid_metrics_data.empty:
-            # Ensure the columns are numeric before plotting their mean
             valid_metrics_data = valid_metrics_data.apply(pd.to_numeric, errors='coerce').dropna(how='all')
             
-            if not valid_metrics_data.empty: # Re-check after numeric conversion
+            if not valid_metrics_data.empty:
                 plt.figure(figsize=(12, 6))
                 ax = valid_metrics_data.mean().plot(kind='bar', color=sns.color_palette("husl", len(valid_metrics_data.columns)))
-                plt.title('Overall Performance Metrics', fontsize=14, pad=20)
+                plt.title('Overall Performance Metrics (Average from Detailed Results)', fontsize=14, pad=20)
                 plt.ylabel('Average Score', fontsize=12)
-                # Set y-limit only if the maximum value is within a reasonable range (e.g., for scores 0-1)
-                max_val = valid_metrics_data.mean().max()
-                # Consider if processing time might skew this. For mixed metrics, 0-1 might not always apply.
-                # If you have processing time in here, max_val could be > 1.
-                # A more robust check might be to apply ylim only to metrics known to be [0,1]
-                if all(val <= 1.05 for val in valid_metrics_data.mean().drop(labels=['processing_time'], errors='ignore')):
+                
+                # Check if all relevant means are <= 1.05 for ylim (ignoring processing_time)
+                means_for_ylim_check = valid_metrics_data.mean().drop(labels=['processing_time'], errors='ignore', axis='index')
+                if not means_for_ylim_check.empty and all(val <= 1.05 for val in means_for_ylim_check):
                     plt.ylim(0,1)
+                
                 plt.xticks(rotation=45, ha='right')
                 for container in ax.containers:
                     ax.bar_label(container, fmt='%.2f')
-                self._save_plot('overall_metrics_bar.png')
+                self._save_plot('detailed_results_overall_metrics_bar.png')
             else:
-                logger.warning("No valid numeric overall performance metrics found to plot after type conversion and NaN removal.")
+                logger.warning("No valid numeric overall performance metrics found to plot after type conversion and NaN removal for detailed results summary.")
         else:
-            logger.warning("No valid numeric overall performance metrics found to plot (all NaN).")
+            logger.warning("No valid numeric overall performance metrics found to plot (all NaN) for detailed results summary.")
 
-        # You can add more dynamic detailed plots here if needed.
-        # For instance, time series plots if 'timestamp' column exists.
-        # Or individual record performance if 'record_id' exists and you want to show per-record scores.
 
-# --- Test Data and Execution ---
+# --- Test Data and Execution (for demonstration, won't be in the final module) ---
 if __name__ == "__main__":
-    test_output_dir = "test_visualizations"
+    test_output_dir = "test_visualizations_structured"
     
     # Clean up previous test run directory if it exists
     if Path(test_output_dir).exists():
         shutil.rmtree(test_output_dir)
         print(f"Cleaned up existing directory: {test_output_dir}")
 
-    # Sample evaluation results
+    # Sample evaluation results - adapted to the flat aggregate_metrics.json structure
     sample_evaluation_results = {
         'aggregate_metrics': {
-            'categorical_metrics': {
-                'event_type': {'accuracy': 0.85, 'fuzzy_accuracy': 0.92},
-                'event_sub_type': {'accuracy': 0.78, 'fuzzy_accuracy': 0.88},
-                'severity': {'accuracy': 0.90}
-            },
-            'text_similarity_metrics': {
-                'description': {
-                    'mean_cosine_similarity': 0.75,
-                    'std_cosine_similarity': 0.10,
-                    'rouge_scores': {'rouge1': 0.65, 'rouge2': 0.55, 'rougeL': 0.60}
-                },
-                'summary': {
-                    'mean_cosine_similarity': 0.82,
-                    'std_cosine_similarity': 0.08,
-                    'rouge_scores': {'rouge1': 0.70, 'rouge2': 0.62, 'rougeL': 0.68}
-                }
-            },
-            'processing_metrics': {
-                'mean_processing_time': 1.25,
-                'individual_processing_times': [1.1, 1.3, 1.2, 1.5, 1.0, 1.4, 1.2, 1.1, 1.3, 1.2, 1.6, 1.0, 1.1, 1.2, 1.3]
-            },
-            'set_similarity_metrics': {
-                'keywords': {
-                    'mean_jaccard_similarity': 0.70,
-                    'std_jaccard_similarity': 0.15
-                }
-            }
+            # Categorical metrics (flat structure)
+            'event_type_strict_accuracy': 0.6,
+            'event_type_fuzzy_accuracy': 0.631,
+            'event_sub_type_strict_accuracy': 0.4,
+            'event_sub_type_fuzzy_accuracy': 0.643,
+            'state_of_victim_strict_accuracy': 0.8,
+            'victim_gender_strict_accuracy': 0.9,
+            
+            # Text similarity metrics (flat structure, with '_mean' suffix)
+            'specified_matter_jaccard_mean': 0.547,
+            'specified_matter_bleu_mean': 0.489,
+            'specified_matter_rouge_1_mean': 0.614,
+            'specified_matter_rouge_2_mean': 0.560,
+            'specified_matter_rouge_l_mean': 0.595,
+            'specified_matter_llm_similarity_mean': 0.920,
+            
+            'date_reference_jaccard_mean': 0.8,
+            'date_reference_bleu_mean': 0.8,
+            'date_reference_rouge_1_mean': 0.8,
+            'date_reference_rouge_2_mean': 0.8,
+            'date_reference_rouge_l_mean': 0.8,
+            'date_reference_llm_similarity_mean': 0.8,
+
+            'frequency_jaccard_mean': 0.9,
+            'frequency_bleu_mean': 0.9,
+            'frequency_rouge_1_mean': 0.9,
+            'frequency_rouge_2_mean': 0.9,
+            'frequency_rouge_l_mean': 0.9,
+            'frequency_llm_similarity_mean': 0.9,
+
+            # Add more text fields as needed for robustness
+            'identification_jaccard_mean': 0.85,
+            'identification_bleu_mean': 0.231, # Lower BLEU to test variability
+            'identification_rouge_1_mean': 0.866,
+            'identification_rouge_2_mean': 0.600,
+            'identification_rouge_l_mean': 0.866,
+            'identification_llm_similarity_mean': 0.895,
+
+            'object_involved_jaccard_mean': 0.77,
+            'object_involved_bleu_mean': 0.581,
+            'object_involved_rouge_1_mean': 0.733,
+            'object_involved_rouge_2_mean': 0.700,
+            'object_involved_rouge_l_mean': 0.733,
+            'object_involved_llm_similarity_mean': 0.870,
+            
+            # Processing metrics (assumed top-level)
+            'mean_processing_time': 1.25,
+            
+            # Additional Jaccard-like metrics (for plot_keyword_similarity)
+            'keywords_jaccard_mean': 0.70, # This was in old structure, adding back for demo
+            'tags_jaccard_mean': 0.65 # Another example
         },
         'detailed_results': [
             {
                 'id': 'rec1', 'event_type_accuracy': 1.0, 'event_sub_type_accuracy': 1.0, 'severity_accuracy': 1.0,
-                'description_jaccard': 0.7, 'description_bleu': 0.65, 'description_rouge_1': 0.6, 'description_rouge_2': 0.5, 'description_rouge_l': 0.55, 'description_llm_similarity': 0.8,
-                'summary_jaccard': 0.8, 'summary_bleu': 0.75, 'summary_rouge_1': 0.7, 'summary_rouge_2': 0.6, 'summary_rouge_l': 0.65, 'summary_llm_similarity': 0.85,
+                'specified_matter_jaccard': 0.7, 'specified_matter_bleu': 0.65, 'specified_matter_rouge_1': 0.6, 'specified_matter_rouge_2': 0.5, 'specified_matter_rouge_l': 0.55, 'specified_matter_llm_similarity': 0.8,
+                'date_reference_jaccard': 0.8, 'date_reference_bleu': 0.75, 'date_reference_rouge_1': 0.7, 'date_reference_rouge_2': 0.6, 'date_reference_rouge_l': 0.65, 'date_reference_llm_similarity': 0.85,
                 'keywords_jaccard': 0.75, 'processing_time': 1.1
             },
             {
                 'id': 'rec2', 'event_type_accuracy': 0.0, 'event_sub_type_accuracy': 1.0, 'severity_accuracy': 0.0,
-                'description_jaccard': 0.6, 'description_bleu': 0.55, 'description_rouge_1': 0.5, 'description_rouge_2': 0.4, 'description_rouge_l': 0.45, 'description_llm_similarity': 0.7,
-                'summary_jaccard': 0.7, 'summary_bleu': 0.65, 'summary_rouge_1': 0.6, 'summary_rouge_2': 0.5, 'summary_rouge_l': 0.55, 'summary_llm_similarity': 0.78,
+                'specified_matter_jaccard': 0.6, 'specified_matter_bleu': 0.55, 'specified_matter_rouge_1': 0.5, 'specified_matter_rouge_2': 0.4, 'specified_matter_rouge_l': 0.45, 'specified_matter_llm_similarity': 0.7,
+                'date_reference_jaccard': 0.7, 'date_reference_bleu': 0.65, 'date_reference_rouge_1': 0.6, 'date_reference_rouge_2': 0.5, 'date_reference_rouge_l': 0.55, 'date_reference_llm_similarity': 0.78,
                 'keywords_jaccard': 0.65, 'processing_time': 1.3
             },
             {
                 'id': 'rec3', 'event_type_accuracy': 1.0, 'event_sub_type_accuracy': 0.0, 'severity_accuracy': 1.0,
-                'description_jaccard': 0.8, 'description_bleu': 0.75, 'description_rouge_1': 0.7, 'description_rouge_2': 0.6, 'description_rouge_l': 0.65, 'description_llm_similarity': 0.88,
-                'summary_jaccard': 0.9, 'summary_bleu': 0.85, 'summary_rouge_1': 0.8, 'summary_rouge_2': 0.7, 'summary_rouge_l': 0.75, 'summary_llm_similarity': 0.92,
+                'specified_matter_jaccard': 0.8, 'specified_matter_bleu': 0.75, 'specified_matter_rouge_1': 0.7, 'specified_matter_rouge_2': 0.6, 'specified_matter_rouge_l': 0.65, 'specified_matter_llm_similarity': 0.88,
+                'date_reference_jaccard': 0.9, 'date_reference_bleu': 0.85, 'date_reference_rouge_1': 0.8, 'date_reference_rouge_2': 0.7, 'date_reference_rouge_l': 0.75, 'date_reference_llm_similarity': 0.92,
                 'keywords_jaccard': 0.80, 'processing_time': 1.2
             },
             {
                 'id': 'rec4', 'event_type_accuracy': 0.0, 'event_sub_type_accuracy': 0.0, 'severity_accuracy': 0.0,
-                'description_jaccard': 'not specified', 'description_bleu': 0.45, 'description_rouge_1': 0.4, 'description_rouge_2': 0.3, 'description_rouge_l': 0.35, 'description_llm_similarity': 0.6,
-                'summary_jaccard': 0.6, 'summary_bleu': 0.55, 'summary_rouge_1': 0.5, 'summary_rouge_2': 0.4, 'summary_rouge_l': 0.45, 'summary_llm_similarity': 0.7,
+                'specified_matter_jaccard': 'not specified', 'specified_matter_bleu': 0.45, 'specified_matter_rouge_1': 0.4, 'specified_matter_rouge_2': 0.3, 'specified_matter_rouge_l': 0.35, 'specified_matter_llm_similarity': 0.6,
+                'date_reference_jaccard': 0.6, 'date_reference_bleu': 0.55, 'date_reference_rouge_1': 0.5, 'date_reference_rouge_2': 0.4, 'date_reference_rouge_l': 0.45, 'date_reference_llm_similarity': 0.7,
                 'keywords_jaccard': 0.55, 'processing_time': 1.5
             },
-             {
+            {
                 'id': 'rec5', 'event_type_accuracy': 1.0, 'event_sub_type_accuracy': 1.0, 'severity_accuracy': 1.0,
-                'description_jaccard': 0.9, 'description_bleu': 0.85, 'description_rouge_1': 0.8, 'description_rouge_2': 0.7, 'description_rouge_l': 0.75, 'description_llm_similarity': 0.95,
-                'summary_jaccard': 0.95, 'summary_bleu': 0.9, 'summary_rouge_1': 0.85, 'summary_rouge_2': 0.75, 'summary_rouge_l': 0.8, 'summary_llm_similarity': 0.98,
+                'specified_matter_jaccard': 0.9, 'specified_matter_bleu': 0.85, 'specified_matter_rouge_1': 0.8, 'specified_matter_rouge_2': 0.7, 'specified_matter_rouge_l': 0.75, 'specified_matter_llm_similarity': 0.95,
+                'date_reference_jaccard': 0.95, 'date_reference_bleu': 0.9, 'date_reference_rouge_1': 0.85, 'date_reference_rouge_2': 0.75, 'date_reference_rouge_l': 0.8, 'date_reference_llm_similarity': 0.98,
                 'keywords_jaccard': 0.90, 'processing_time': 1.0
             },
             {
                 'id': 'rec6', 'event_type_accuracy': 1.0, 'event_sub_type_accuracy': 1.0, 'severity_accuracy': 1.0,
-                'description_jaccard': 0.85, 'description_bleu': 0.8, 'description_rouge_1': 0.75, 'description_rouge_2': 0.65, 'description_rouge_l': 0.7, 'description_llm_similarity': 0.9,
-                'summary_jaccard': 0.88, 'summary_bleu': 0.82, 'summary_rouge_1': 0.78, 'summary_rouge_2': 0.68, 'summary_rouge_l': 0.73, 'summary_llm_similarity': 0.93,
+                'specified_matter_jaccard': 0.85, 'specified_matter_bleu': 0.8, 'specified_matter_rouge_1': 0.75, 'specified_matter_rouge_2': 0.65, 'specified_matter_rouge_l': 0.7, 'specified_matter_llm_similarity': 0.9,
+                'date_reference_jaccard': 0.88, 'date_reference_bleu': 0.82, 'date_reference_rouge_1': 0.78, 'date_reference_rouge_2': 0.68, 'date_reference_rouge_l': 0.73, 'date_reference_llm_similarity': 0.93,
                 'keywords_jaccard': 0.85, 'processing_time': 1.6
             },
             {
                 'id': 'rec7', 'event_type_accuracy': 0.0, 'event_sub_type_accuracy': 0.0, 'severity_accuracy': 0.0,
-                'description_jaccard': 0.5, 'description_bleu': 0.4, 'description_rouge_1': 0.3, 'description_rouge_2': 0.2, 'description_rouge_l': 0.25, 'description_llm_similarity': 0.5,
-                'summary_jaccard': 0.55, 'summary_bleu': 0.45, 'summary_rouge_1': 0.4, 'summary_rouge_2': 0.3, 'summary_rouge_l': 0.35, 'summary_llm_similarity': 0.6,
+                'specified_matter_jaccard': 0.5, 'specified_matter_bleu': 0.4, 'specified_matter_rouge_1': 0.3, 'specified_matter_rouge_2': 0.2, 'specified_matter_rouge_l': 0.25, 'specified_matter_llm_similarity': 0.5,
+                'date_reference_jaccard': 0.55, 'date_reference_bleu': 0.45, 'date_reference_rouge_1': 0.4, 'date_reference_rouge_2': 0.3, 'date_reference_rouge_l': 0.35, 'date_reference_llm_similarity': 0.6,
                 'keywords_jaccard': 0.45, 'processing_time': 0.9
             }
         ]
@@ -763,18 +829,24 @@ if __name__ == "__main__":
         visualizer.create_visualizations(sample_evaluation_results, test_output_dir)
         print(f"\nVisualizations creation process completed. Checking generated files...")
 
-        # List files in the output directory
-        generated_files = list(Path(test_output_dir).iterdir())
+        # List files in the output directory and its subdirectories
+        generated_files = []
+        for root, dirs, files in os.walk(test_output_dir):
+            for file in files:
+                generated_files.append(Path(root) / file)
+
         if generated_files:
             print(f"\nSuccessfully generated {len(generated_files)} files in '{test_output_dir}':")
             for f in generated_files:
-                print(f" - {f.name}")
-            print("\nVerification successful: Plots were generated.")
+                print(f" - {f.relative_to(test_output_dir)}")
+            print("\nVerification successful: Plots were generated and likely structured.")
         else:
             print("\nVerification failed: No plots were generated.")
             
     except Exception as e:
         print(f"\nAn error occurred during visualization creation: {e}")
+        import traceback
+        traceback.print_exc() # Print full traceback for debugging
         print("Verification failed: Plots were NOT generated due to an error.")
 
     finally:

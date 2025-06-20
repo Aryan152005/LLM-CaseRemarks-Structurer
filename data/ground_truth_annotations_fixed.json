@@ -23,14 +23,7 @@
     "mode_of_threat": "forcing themselves on me",
     "need_ambulance": "not specified",
     "children_involved": "not specified",
-    "__input_tokens": 1567,
-    "__output_tokens": 232,
-    "__processing_time_sec": 6.007158818000789,
-    "__tokens_per_second": 299.4760176157147,
-    "__status": "success",
-    "__error_message": "",
-    "processing_time": 0,
-    "file_text": ""
+    "generated_event_sub_type_detail": "not_specified"
   },
   {
     "file_name": "audio8_truth",
@@ -56,14 +49,7 @@
     "mode_of_threat": "hit and run",
     "need_ambulance": "yes",
     "children_involved": "two children going to school",
-    "__input_tokens": 1665,
-    "__output_tokens": 289,
-    "__processing_time_sec": 7.051473574999363,
-    "__tokens_per_second": 277.10520066724865,
-    "__status": "success",
-    "__error_message": "",
-    "processing_time": 0,
-    "file_text": ""
+    "generated_event_sub_type_detail": "not_specified"
   },
   {
     "file_name": "audio7_truth",
@@ -89,14 +75,7 @@
     "mode_of_threat": "not specified",
     "need_ambulance": "not specified",
     "children_involved": "not specified",
-    "__input_tokens": 1542,
-    "__output_tokens": 243,
-    "__processing_time_sec": 5.846881012000267,
-    "__tokens_per_second": 305.29097416835174,
-    "__status": "success",
-    "__error_message": "",
-    "processing_time": 0,
-    "file_text": ""
+    "generated_event_sub_type_detail": "not_specified"
   },
   {
     "file_name": "audio9_truth",
@@ -122,14 +101,7 @@
     "mode_of_threat": "physical beating",
     "need_ambulance": "not specified",
     "children_involved": "not specified",
-    "__input_tokens": 1695,
-    "__output_tokens": 234,
-    "__processing_time_sec": 5.755296564000673,
-    "__tokens_per_second": 335.1695222911495,
-    "__status": "success",
-    "__error_message": "",
-    "processing_time": 0,
-    "file_text": ""
+    "generated_event_sub_type_detail": "not_specified"
   },
   {
     "file_name": "audio2_truth",
@@ -155,14 +127,7 @@
     "mode_of_threat": "verbal and physical",
     "need_ambulance": "not specified",
     "children_involved": "not specified",
-    "__input_tokens": 1631,
-    "__output_tokens": 335,
-    "__processing_time_sec": 8.179324357999576,
-    "__tokens_per_second": 240.36215143824253,
-    "__status": "success",
-    "__error_message": "",
-    "processing_time": 0,
-    "file_text": ""
+    "generated_event_sub_type_detail": "not_specified"
   },
   {
     "file_name": "audio6_truth",
@@ -188,14 +153,7 @@
     "mode_of_threat": "not specified",
     "need_ambulance": "not specified",
     "children_involved": "not specified",
-    "__input_tokens": 1550,
-    "__output_tokens": 203,
-    "__processing_time_sec": 4.962506191000102,
-    "__tokens_per_second": 353.24892957901073,
-    "__status": "success",
-    "__error_message": "",
-    "processing_time": 0,
-    "file_text": ""
+    "generated_event_sub_type_detail": "not_specified"
   },
   {
     "file_name": "audio5_truth",
@@ -221,20 +179,13 @@
     "mode_of_threat": "physical violence",
     "need_ambulance": "yes (implied from \"a lot of blood on her hands too\")",
     "children_involved": "not specified",
-    "__input_tokens": 1588,
-    "__output_tokens": 281,
-    "__processing_time_sec": 6.858258461000332,
-    "__tokens_per_second": 272.5181634124928,
-    "__status": "success",
-    "__error_message": "",
-    "processing_time": 0,
-    "file_text": ""
+    "generated_event_sub_type_detail": "not_specified"
   },
   {
     "file_name": "audio10_truth",
     "event_info_text": "Hello Police Control Room Hello Sir, please tell me Yes Ma'am, I have faced a problem what has happened here in Lal Thappad area what happened is that I had bought a car just fifteen minutes ago so what happened is that I had bought a car, okay just fifteen minutes ago so he said that everything is okay with the car, I had bought a car, made the payment etc. and took the car fifteen minutes ago and now the car developed a fault on the way and when I went to give it back to him, he is not picking up the phone or taking it out, which car have you bought, BMW Seven series, second hand, first second, second hand, so here is that doctor, he has a clinic, he is not opening the clinic here right now and he is not picking up the phone either, so you guys can please come and help me because we are not local here, where in Lal Thappad, in Lal Thappad, Surprise Hotel, opposite to Surprise Hotel, Sunrise Sunrise Sunrise Hotel, what is your name, my name is Abhilash Kumar, so you guys will send someone from the police because you are telling me, telling me about this I am ok",
     "event_type": "OTHERS",
-    "event_sub_type": "OTHERS[VEHICLE FRAUD]",
+    "event_sub_type": "OTHERS",
     "state_of_victim": "not specified",
     "victim_gender": "not specified",
     "specified_matter": "I had bought a car just fifteen minutes ago so what happened is that I had bought a car, okay just fifteen minutes ago so he said that everything is okay with the car, I had bought a car, made the payment etc. and took the car fifteen minutes ago and now the car developed a fault on the way and when I went to give it back to him, he is not picking up the phone or taking it out...",
@@ -254,14 +205,7 @@
     "mode_of_threat": "not specified",
     "need_ambulance": "not specified",
     "children_involved": "not specified",
-    "__input_tokens": 1620,
-    "__output_tokens": 332,
-    "__processing_time_sec": 8.117048187000364,
-    "__tokens_per_second": 240.48150941449038,
-    "__status": "success",
-    "__error_message": "",
-    "processing_time": 0,
-    "file_text": ""
+    "generated_event_sub_type_detail": "VEHICLE FRAUD"
   },
   {
     "file_name": "audio1_truth",
@@ -287,14 +231,7 @@
     "mode_of_threat": "threatening to kill",
     "need_ambulance": "not specified",
     "children_involved": "not specified",
-    "__input_tokens": 1577,
-    "__output_tokens": 245,
-    "__processing_time_sec": 5.986788809000245,
-    "__tokens_per_second": 304.3367752109268,
-    "__status": "success",
-    "__error_message": "",
-    "processing_time": 0,
-    "file_text": ""
+    "generated_event_sub_type_detail": "not_specified"
   },
   {
     "file_name": "audio4_truth",
@@ -320,13 +257,6 @@
     "mode_of_threat": "Vandalism and physical assault",
     "need_ambulance": "not specified",
     "children_involved": "not specified",
-    "__input_tokens": 1571,
-    "__output_tokens": 195,
-    "__processing_time_sec": 4.775159308999719,
-    "__tokens_per_second": 369.8305932,
-    "__status": "success",
-    "__error_message": "",
-    "processing_time": 0,
-    "file_text": ""
+    "generated_event_sub_type_detail": "not_specified"
   }
 ]
