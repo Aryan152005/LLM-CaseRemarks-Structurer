@@ -3,7 +3,6 @@ import time
 from typing import Dict, Any, Optional, List
 import requests
 from loguru import logger
-# Assuming schema.py is correct and contains these imports:
 from schema import ProcessedOutput, FIELD_VALUE_SCHEMA, ALL_EVENT_SUB_TYPES, derive_event_type
 import datetime
 from difflib import get_close_matches
@@ -25,7 +24,7 @@ KEYWORD_EVENT_MAP = {
 }
 
 # Few-shot examples for the prompt
-# IMPORTANT: Updated examples to reflect the new `generated_event_sub_type_detail` field
+
 FEW_SHOT_EXAMPLES = [
     {
     "file_name": "audio6_truth",
@@ -115,18 +114,16 @@ def get_few_shot_examples_str():
     for ex in FEW_SHOT_EXAMPLES:
         lines.append('---')
         lines.append('Input Transcript:')
-        # Changed 'input' to 'event_info_text'
         lines.append(f'"""{ex["event_info_text"]}"""')
         lines.append('Output:')
         # Iterate over ProcessedOutput's fields to ensure order and completeness
         for k in ProcessedOutput.model_fields.keys():
-            # Changed ex['output'].get(k) to ex.get(k)
             v = ex.get(k)
             # Ensure 'None' maps to "not specified" for LLM output, as per schema's default expectations
             if v is None or (isinstance(v, str) and v.lower() in ["null", "none"]):
                 # Apply specific casing for "not specified" based on field
                 if k == 'state_of_victim':
-                    lines.append(f"{k}: Not specified")
+                    lines.append(f"{k}: not specified")
                 elif k in ['victim_gender', 'repeat_incident', 'need_ambulance', 'children_involved', 'generated_event_sub_type_detail', 'area', 'date_of_birth', 'contact_number']: # Added date_of_birth, contact_number for explicit handling
                     lines.append(f"{k}: not specified")
                 else:
@@ -139,7 +136,7 @@ def get_few_shot_examples_str():
 class TextProcessor:
     def __init__(self, ollama_base_url: str = "http://localhost:11434"):
         self.ollama_base_url = ollama_base_url
-        self.model_name = "spooknik/hermes-2-pro-mistral-7b:latest" # Or whatever model you are using
+        self.model_name = "mistral:7b" # Chang model with preference
         self.allowed_event_types = FIELD_VALUE_SCHEMA["event_type"]
         self.allowed_event_sub_types = ALL_EVENT_SUB_TYPES
         
@@ -147,10 +144,9 @@ class TextProcessor:
         self.literal_field_corrections = {
             "state_of_victim": {val.lower(): val for val in FIELD_VALUE_SCHEMA["state_of_victim"]},
             "victim_gender": {val.lower(): val for val in FIELD_VALUE_SCHEMA["victim_gender"]},
-            "repeat_incident": {val.lower(): val for val in ["yes", "no", "not specified"]},
-            "need_ambulance": {val.lower(): val for val in ["yes", "no", "not specified"]},
-            "children_involved": {val.lower(): val for val in ["yes", "no", "not specified"]},
-            # Add other literal fields from FIELD_VALUE_SCHEMA if they exist and need similar correction
+            "repeat_incident": {v.lower(): v for v in ["yes", "no", "not specified", "not applicable"]},
+            "need_ambulance": {v.lower(): v for v in ["yes", "no", "not specified", "not applicable"]},
+            "children_involved": {v.lower(): v for v in ["yes", "no", "not specified", "not applicable"]},
         }
 
     def _call_llm(self, prompt: str) -> Dict[str, Any]:
@@ -167,7 +163,7 @@ class TextProcessor:
                     "stream": False,
                     "options": {
                         "temperature": 0.1, # Keep temperature low for structured extraction
-                        "num_ctx": 4096 # Adjust context window if your prompts are very long
+                        "num_ctx": 4096 # Adjust context window if prompt is long
                     }
                 }
             )
@@ -188,7 +184,7 @@ class TextProcessor:
 
         return f"""
 SYSTEM ROLE:
-You are an AI system assisting the Emergency Response Support System (ERSS) project under C-DAC, analyzing 112 emergency call transcripts. Your task is to classify and extract accurate structured metadata from unstructured call conversations between the caller and the emergency call taker.
+You are an AI system assisting the Emergency Response Support System (ERSS) project, analyzing 112 emergency call transcripts. Your task is to classify and extract accurate structured metadata from unstructured call conversations between the caller and the emergency call taker.
 
 GENERAL OBJECTIVE:
 Your primary focus is to determine the correct `event_sub_type` from the transcript. Then, ensure all other fields are filled strictly based on what is explicitly mentioned.
@@ -210,7 +206,7 @@ YOUR RULES (Follow These STRICTLY):
 3.  **Categorical Fields** (like `state_of_victim`, `victim_gender`, `need_ambulance`, `repeat_incident`, `children_involved`):
     * Only select from the **exact** allowed options.
     * If unknown or not mentioned, set as "not specified".
-    * Be strict about casing: "Not specified" for `state_of_victim`, "not specified" for `victim_gender`, `repeat_incident`, `need_ambulance`, `children_involved`, and `generated_event_sub_type_detail`.
+    * Be strict about casing: "not specified" for `state_of_victim`, "not specified" for `victim_gender`, `repeat_incident`, `need_ambulance`, `children_involved`, and `generated_event_sub_type_detail`.
 
 4.  **Text/Freeform Fields** (like `incident_location`, `specified_matter`, `suspect_description`, `area`, `contact_number`):
     * If clearly present, extract the most accurate and specific text **as stated in the transcript**.
@@ -259,12 +255,42 @@ INPUT TRANSCRIPT (verbatim):
 YOUR RESPONSE (STRICTLY in field: value format):
 """
 
+    def _fuzzy_match_field_name(self, llm_field_name: str) -> Optional[str]:
+        """
+        Attempts to fuzzy match an LLM-returned field name to a known ProcessedOutput field name.
+        Returns the matched schema f  ield name or None if no good match is found.
+        """
+        llm_field_name_lower = llm_field_name.lower().replace('_', '')
+        
+        # Pre-process schema field names for matching (remove underscores for more robust fuzzy matching)
+        processed_model_fields = {f.lower().replace('_', ''): f for f in ProcessedOutput.model_fields.keys()}
+
+        # Try direct match after normalization
+        if llm_field_name_lower in processed_model_fields:
+            return processed_model_fields[llm_field_name_lower]
+
+        # Try fuzzy matching
+        # Consider a list of all normalized schema field names for get_close_matches
+        normalized_schema_fields = list(processed_model_fields.keys())
+
+        # Lower the cutoff if you want more aggressive matching, but be careful with false positives
+        matches = get_close_matches(llm_field_name_lower, normalized_schema_fields, n=1, cutoff=0.75) # Adjusted cutoff
+
+        if matches:
+            matched_normalized_field = matches[0]
+            original_schema_field = processed_model_fields[matched_normalized_field]
+            logger.info(f"Fuzzy matched LLM field '{llm_field_name}' to '{original_schema_field}'.")
+            return original_schema_field
+        
+        return None
+
+
     def _parse_llm_field_value_output(self, llm_output: str) -> dict:
         result = {}
-        model_fields = ProcessedOutput.model_fields.keys()
+        model_fields = ProcessedOutput.model_fields.keys() # Original schema field names
         
         default_not_specified_mapping = {
-            "state_of_victim": "Not specified",
+            "state_of_victim": "not specified",
             "victim_gender": "not specified",
             "repeat_incident": "not specified",
             "need_ambulance": "not specified",
@@ -279,17 +305,23 @@ YOUR RESPONSE (STRICTLY in field: value format):
             if not line.strip() or ':' not in line:
                 continue
             
-            field, value = line.split(':', 1)
-            field = field.strip()
+            llm_field, value = line.split(':', 1)
+            llm_field = llm_field.strip()
             value = value.strip()
+
+            # --- Fuzzy match the LLM's field name to the schema's field name ---
+            matched_field = self._fuzzy_match_field_name(llm_field)
+
+            if not matched_field:
+                logger.warning(f"Unknown field returned by LLM: '{llm_field}'. Skipping.")
+                continue
+            
+            # Use the matched_field for all subsequent logic
+            field = matched_field
 
             # Normalize common "None", empty string, or invalid outputs to "not specified"
             if value.lower() in ["null", "none", "", "not_defined", "n/a"]:
                 value = "not specified" 
-
-            if field not in model_fields:
-                logger.warning(f"Unknown field returned by LLM: {field}. Skipping.")
-                continue
 
             # --- Special Handling for event_sub_type and generated_event_sub_type_detail ---
             # Process these so they are in 'result' before the final correction step

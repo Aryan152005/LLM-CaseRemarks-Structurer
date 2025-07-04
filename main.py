@@ -1,20 +1,31 @@
 import json
+import os
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List
+from datetime import datetime
 import pandas as pd
 from loguru import logger
-from schema import ProcessedOutput, FIELD_VALUE_SCHEMA
+from schema import ProcessedOutput
 from text_processor import TextProcessor
 from evaluator import Evaluator
 from visualizer import Visualizer
-import os
-from datetime import datetime
 
-# Configure logger
-logger.add("file.log", rotation="500 MB")
+# =================== CONFIGURABLE PATHS ===================
+DATA_FOLDER = "test_data/hindi/hindi_42_txt"
+GROUND_TRUTH_PATH = "test_data/hindi/cleaned_new_40_hindi_human.json"
+OUTPUT_BASE_PATH = "test_data/hindi/output_mistral_42_NEW/predictions"
+CSV_OUTPUT_PATH = "test_data/hindi/output_mistral_42_NEW/predictions.csv"
+EVAL_RESULTS_BASE = "test_data/hindi/output_mistral_42_NEW/evaluation_results"
+VISUALIZATION_DIR = "test_data/hindi/output_mistral_42_NEW/visualizations"
+LOG_FILE = "file.log"
+
+BATCH_SIZE = 10  # Save after every 10 files
+MAX_FILE_SIZE_MB = 10  # Create new JSON file if this size is exceeded
+# ===========================================================
+
+logger.add(LOG_FILE, rotation="500 MB")
 
 def load_ground_truth(file_path: str) -> list:
-    """Load ground truth data from JSON file"""
     try:
         with open(file_path, 'r') as f:
             return json.load(f)
@@ -22,83 +33,103 @@ def load_ground_truth(file_path: str) -> list:
         logger.error(f"Error loading ground truth: {str(e)}")
         return []
 
-def save_predictions(predictions: list, output_dir: str):
-    """Save predictions to JSON and CSV files"""
+def append_to_json_file(new_data: List[dict], file_base_path: str, max_file_size_mb: int = 10) -> str:
+    os.makedirs(os.path.dirname(file_base_path), exist_ok=True)
+    index = 0
+    current_path = f"{file_base_path}.json"
+
+    # Find a file that either doesn't exist or is not too large
+    while os.path.exists(current_path) and os.path.getsize(current_path) > max_file_size_mb * 1024 * 1024:
+        index += 1
+        current_path = f"{file_base_path}_{index}.json"
+
+    # Load existing content if any
+    if os.path.exists(current_path):
+        try:
+            with open(current_path, 'r', encoding='utf-8') as f:
+                existing_data = json.load(f)
+        except json.JSONDecodeError:
+            existing_data = []
+    else:
+        existing_data = []
+
+    # Append new data
+    existing_data.extend(new_data)
+
+    # Save updated file
+    with open(current_path, 'w', encoding='utf-8') as f:
+        json.dump(existing_data, f, indent=2, ensure_ascii=False, default=str)
+
+    logger.info(f"Appended {len(new_data)} predictions to {current_path}")
+    return current_path
+
+def save_csv(predictions: List[ProcessedOutput], path: str):
     try:
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Convert ProcessedOutput objects to dictionaries and handle datetime serialization
-        def serialize_datetime(obj):
-            if isinstance(obj, datetime):
-                return obj.isoformat()
-            return str(obj)
-            
-        json_data = [pred.model_dump() for pred in predictions]
-        
-        # Save as JSON
-        json_path = os.path.join(output_dir, "predictions.json")
-        with open(json_path, 'w') as f:
-            json.dump(json_data, f, indent=2, default=serialize_datetime)
-        logger.info(f"Predictions saved to {json_path}")
-        
-        # Save as CSV
-        csv_path = os.path.join(output_dir, "predictions.csv")
-        df = pd.DataFrame(json_data)
-        df.to_csv(csv_path, index=False)
-        logger.info(f"Predictions saved to {csv_path}")
-        
+        df = pd.DataFrame([p.model_dump() for p in predictions])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        df.to_csv(path, index=False)
+        logger.info(f"Predictions also saved to CSV at {path}")
     except Exception as e:
-        logger.error(f"Error saving predictions: {str(e)}")
+        logger.error(f"Error saving CSV: {str(e)}")
 
 def main():
-    # Initialize components
-    # TextProcessor is initialized without arguments, using its default Ollama URL
     processor = TextProcessor()
     logger.info("TextProcessor initialized.")
 
-    evaluator = Evaluator(ground_truth_file="data/ground_truth_annotations_fixed.json")
+    evaluator = Evaluator(ground_truth_file=GROUND_TRUTH_PATH)
     visualizer = Visualizer()
     
-    # Process all text files in the data directory
-    data_folder = "data/ground_truth_hin" # This path should exist and contain your .txt files
-    predictions = []
-    
-    if not os.path.exists(data_folder):
-        logger.error(f"Data folder '{data_folder}' not found. Please ensure it exists and contains your input text files.")
+    predictions: List[ProcessedOutput] = []
+    batch: List[ProcessedOutput] = []
+
+    if not os.path.exists(DATA_FOLDER):
+        logger.error(f"Data folder '{DATA_FOLDER}' not found.")
         return
 
-    # Check if data_folder is empty or contains no .txt files
-    txt_files_found = False
-    for filename in os.listdir(data_folder):
-        if filename.endswith(".txt"):
-            txt_files_found = True
-            file_path = os.path.join(data_folder, filename)
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f: # Added encoding for robustness
-                    text = f.read()
-                
-                # Process the text
-                result = processor.process_text(text)
-                result.file_name = filename # Assign filename after processing for output consistency
-                predictions.append(result)
-                logger.info(f"Processed {filename}")
-                
-            except Exception as e:
-                logger.error(f"Error processing {filename}: {str(e)}")
-    
-    if not txt_files_found:
-        logger.warning(f"No .txt files found in '{data_folder}'. No predictions will be generated.")
+    all_files = sorted([f for f in os.listdir(DATA_FOLDER) if f.endswith(".txt")])
+    if not all_files:
+        logger.warning("No .txt files found for processing.")
         return
 
-    # Save predictions
-    save_predictions(predictions, "hindi_output_10_hermes")
-    
-    # Evaluate predictions
+    for idx, filename in enumerate(all_files, 1):
+        file_path = os.path.join(DATA_FOLDER, filename)
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+
+            result = processor.process_text(text)
+            result.file_name = filename
+            predictions.append(result)
+            batch.append(result)
+            logger.info(f"[{idx}/{len(all_files)}] Processed {filename}")
+
+            if len(batch) >= BATCH_SIZE:
+                serialized_batch = [b.model_dump() for b in batch]
+                append_to_json_file(serialized_batch, OUTPUT_BASE_PATH, max_file_size_mb=MAX_FILE_SIZE_MB)
+                batch.clear()
+
+        except Exception as e:
+            logger.error(f"Error processing {filename}: {str(e)}")
+
+    # Save any remaining batch
+    if batch:
+        serialized_batch = [b.model_dump() for b in batch]
+        final_json_path = append_to_json_file(serialized_batch, OUTPUT_BASE_PATH, max_file_size_mb=MAX_FILE_SIZE_MB)
+    else:
+        final_json_path = f"{OUTPUT_BASE_PATH}.json"
+
+    # Save full CSV
+    save_csv(predictions, CSV_OUTPUT_PATH)
+
+    # Evaluate
     evaluation_results = evaluator.evaluate_predictions(predictions)
-    evaluator.save_evaluation_results(evaluation_results, "hindi_output_10_hermes/evaluation_results.json")
-    
-    # Create visualizations
-    visualizer.create_visualizations(evaluation_results, "hindi_output_10_hermes/visualizations")
+
+    # Save evaluation results
+    eval_path = final_json_path.replace("predictions", "evaluation_results")
+    evaluator.save_evaluation_results(evaluation_results, eval_path)
+
+    # Save visualizations
+    visualizer.create_visualizations(evaluation_results, VISUALIZATION_DIR)
 
 if __name__ == "__main__":
     main()

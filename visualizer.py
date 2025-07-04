@@ -27,6 +27,7 @@ class Visualizer:
         """Sets the current directory where plots will be saved."""
         self.current_plot_dir = self.base_output_dir / subdirectory
         self.current_plot_dir.mkdir(exist_ok=True, parents=True)
+        logger.debug(f"Current plot directory set to: {self.current_plot_dir}") # Added logging # Added logging
 
     def _save_plot(self, filename: str):
         """Save the current plot to the configured output directory."""
@@ -34,7 +35,7 @@ class Visualizer:
         save_path = self.current_plot_dir / filename # Use current_plot_dir
         try:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-            logger.debug(f"Plot saved to {save_path}")
+            logger.debug(f"Plot saved to {save_path}") # Added logging
         except Exception as e:
             logger.error(f"Failed to save plot {filename}: {e}")
         finally:
@@ -44,22 +45,25 @@ class Visualizer:
         """Plot categorical metrics (accuracy) using bar and pie charts."""
         self._set_plot_directory("categorical_metrics") # Set subdirectory for these plots
 
-        # Adjusted to handle the new flat structure
-        # We need to explicitly find accuracy metrics by name pattern
-        accuracy_metrics = {}
-        for key, value in metrics.items():
-            if 'accuracy' in key:
-                # Exclude specific comparison metrics if they are only for _plot_event_accuracy_comparison
-                if 'event_type_' in key or 'event_sub_type_' in key or 'severity_' in key or 'victim_gender_' in key or 'state_of_victim_' in key:
-                    accuracy_metrics[key] = value
+        accuracy_metrics_to_plot = {}
+        target_keys = [
+            'event_type_strict_accuracy', 'event_sub_type_strict_accuracy',
+            'state_of_victim_strict_accuracy', 'victim_gender_strict_accuracy',
+            'event_type_fuzzy_accuracy', 'event_sub_type_fuzzy_accuracy',
+            'type_strict_accuracy', 'sub_type_strict_accuracy',
+            'type_fuzzy_accuracy', 'sub_type_fuzzy_accuracy'
+        ]
+        
+        for k in target_keys:
+            if k in metrics:
+                accuracy_metrics_to_plot[k.replace('_accuracy', '').replace('_', ' ').title()] = metrics[k]
 
-        if not accuracy_metrics:
-            logger.warning("No categorical accuracy metrics to plot (excluding comparison metrics for this specific function).")
+        if not accuracy_metrics_to_plot:
+            logger.warning("No categorical accuracy metrics to plot found in provided metrics.")
             return
         
-        # Prepare data for plotting (e.g., 'event_type_accuracy' -> 'Event Type Accuracy')
-        fields = [key.replace('_', ' ').title() for key in accuracy_metrics.keys()]
-        accuracies = list(accuracy_metrics.values())
+        fields = list(accuracy_metrics_to_plot.keys())
+        accuracies = list(accuracy_metrics_to_plot.values())
 
         if not fields or not accuracies:
             logger.warning("No fields or accuracies found for categorical metrics to plot.")
@@ -93,150 +97,180 @@ class Visualizer:
             logger.warning("Sum of accuracies is zero or no accuracies, skipping overall categorical pie chart.")
 
     def plot_text_similarity_metrics(self, metrics: Dict[str, Any]):
-        """Plot text similarity metrics using bar and line charts."""
+        """
+        Generates a bar plot for average text similarity metrics across all comparable text fields.
+        Updated to use flat `metrics` dictionary directly.
+        """
         self._set_plot_directory("text_similarity_metrics") # Set subdirectory
 
-        # Adjusted to handle the new flat structure
-        # Look for keys ending with '_jaccard_mean', '_bleu_mean', '_rouge_1_mean', etc.
-        # This function should probably focus on mean_cosine_similarity or a generic 'mean similarity' if that's what's available
-        # Given the new `aggregate_metrics.json`, it looks like everything is by field_metric_mean.
-        # This function should probably average across all fields for a given metric (e.g., average jaccard across all fields).
-        # Or, it should display per-field average for a specific type of similarity (e.g., mean Jaccard for each text field).
-        
-        # Let's try to aggregate all 'mean' values that are not accuracies or processing times
-        # and not explicitly handled by rouge/jaccard/llm specific plots
-        
-        general_similarity_means = {}
-        for key, value in metrics.items():
-            if '_mean' in key and 'accuracy' not in key and 'processing_time' not in key:
-                # Exclude specific rouge/jaccard/llm for the "overall" view this function implies
-                # This makes it a bit tricky, let's refine its purpose for the new data.
-                # Perhaps this function should iterate over specific "metric types" and plot their means across fields.
+        similarity_metrics_to_plot = {}
+        # Iterate through metrics to find text similarity scores like 'field_jaccard_mean'
+        similarity_patterns = [
+            r'_jaccard_mean$', r'_bleu_mean$', r'_rouge_1_mean$', r'_rouge_2_mean$', r'_rouge_l_mean$', r'_llm_similarity_mean$'
+        ]
 
-                # Let's focus this method on a broader "text similarity mean" if that's the intention.
-                # Given the specific new structure, it seems more direct to plot specific metric types per field.
-
-                # Re-thinking: The previous sample had 'mean_cosine_similarity'. The new one has 'field_jaccard_mean'.
-                # This function might be better repurposed to show MEAN JACCARD/BLEU/ROUGE/LLM across ALL applicable fields.
-                # Or, if that's too complex given the flat structure, we can skip it,
-                # as _create_detailed_plots_from_df's bar chart and individual plots
-                # might cover this adequately.
-
-                # For now, let's keep it but adapt its data collection.
-                # Collect average similarity scores for various text fields.
-                # This will extract 'specified_matter_jaccard_mean' -> 'specified_matter' for 'jaccard'
-                
-                match = re.match(r'(.+)_(jaccard|bleu|rouge_1|rouge_2|rouge_l|llm_similarity)_mean$', key)
-                if match:
-                    field_name = match.group(1).replace('_', ' ').title()
-                    metric_type = match.group(2).replace('_', ' ').title()
-                    
-                    if field_name not in general_similarity_means:
-                        general_similarity_means[field_name] = {}
-                    general_similarity_means[field_name][metric_type] = value
-        
-        if not general_similarity_means:
-            logger.warning("No general text similarity mean metrics found to plot.")
-            return
-
-        logger.info("Plotting general text similarity metrics.")
-
-        # Let's plot average Jaccard, Bleu, Rouge_1, Rouge_2, Rouge_L, LLM Similarity across all text fields.
-        # This requires pivotting the data.
         plot_data = []
-        for field, metrics_dict in general_similarity_means.items():
-            for metric, value in metrics_dict.items():
-                plot_data.append({'Field': field, 'Metric': metric, 'Value': value})
-        
+        for key, value in metrics.items():
+            for pattern in similarity_patterns:
+                match = re.search(pattern, key)
+                if match:
+                    field_name = key.replace(match.group(0), '').replace('_', ' ').title()
+                    metric_type = match.group(0).replace('_mean', '').replace('_', ' ').title()
+                    plot_data.append({
+                        'Field': field_name,
+                        'Metric Type': metric_type,
+                        'Average Score': value
+                    })
+                    break # Move to next key once a pattern is matched
+
         if not plot_data:
-            logger.warning("No data points for general text similarity plotting.")
+            logger.warning("No text similarity mean metrics found to plot.")
             return
 
-        df_plot = pd.DataFrame(plot_data)
+        plot_df = pd.DataFrame(plot_data)
+        
+        logger.info("Plotting general text similarity metrics.")
 
         # Grouped Bar Chart
         plt.figure(figsize=(15, 8))
-        ax = sns.barplot(x='Field', y='Value', hue='Metric', data=df_plot, palette='viridis')
-        plt.title('Average Text Similarity Metrics by Field', fontsize=14, pad=20)
+        ax = sns.barplot(x='Field', y='Average Score', hue='Metric Type', data=plot_df, palette='viridis')
+        plt.title('Average Text Similarity Metrics by Field', fontsize=16)
         plt.xlabel('Field', fontsize=12)
         plt.ylabel('Average Score', fontsize=12)
         plt.ylim(0, 1)
         plt.xticks(rotation=45, ha='right')
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
         plt.legend(title='Metric Type', bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
         self._save_plot('avg_text_similarity_metrics_grouped_bar.png')
 
-        # Line Plot (maybe less useful here if too many metrics/fields)
-        # For simplicity, we might skip the line plot for this aggregated view if it gets too cluttered.
-        # If we wanted it, we'd need to consider what "trend" it represents.
-        # For now, stick to the grouped bar.
+    def plot_llm_similarity_metrics(self, metrics: Dict[str, Any]):
+        """
+        Generates a bar plot and a pie chart for average LLM similarity metrics across all comparable text fields.
+        This function specifically handles metrics ending with '_llm_similarity_mean'.
+        """
+        self._set_plot_directory("llm_similarity_metrics") # Set subdirectory for these plots
 
-    def plot_processing_time(self, metrics: Dict[str, Any]):
-        """Plot processing time metrics using bar chart and histogram."""
-        self._set_plot_directory("processing_time_metrics") # Set subdirectory
+        llm_similarity_metrics_to_plot = {}
+        # Iterate through metrics to find LLM similarity scores like 'field_llm_similarity_mean'
+        for key, value in metrics.items():
+            if key.endswith('_llm_similarity_mean'):
+                field_name = key.replace('_llm_similarity_mean', '').replace('_', ' ').title()
+                llm_similarity_metrics_to_plot[field_name] = value
 
-        mean_processing_time = metrics.get('mean_processing_time') # Assuming it's still top-level 'mean_processing_time'
-        if mean_processing_time is None:
-            logger.warning("Mean processing time not found in metrics.")
+        if not llm_similarity_metrics_to_plot:
+            logger.warning("No LLM similarity mean metrics found to plot.")
             return
-        
-        logger.info("Plotting processing time metrics.")
 
-        # Bar Chart for Mean Processing Time
+        fields = list(llm_similarity_metrics_to_plot.keys())
+        scores = list(llm_similarity_metrics_to_plot.values())
+
+        if not fields or not scores:
+            logger.warning("No fields or scores found for LLM similarity metrics to plot.")
+            return
+
+        logger.info(f"Plotting aggregate LLM similarity metrics for fields: {fields}")
+
+        # Bar Chart for Average LLM Similarity
         plt.figure(figsize=(10, 6))
-        times = [mean_processing_time]
-        labels = ['Mean Processing Time']
-        bars = plt.bar(labels, times, color=sns.color_palette("husl", 1)[0])
-        plt.title('Average Processing Time', fontsize=14, pad=20)
-        plt.ylabel('Time (seconds)', fontsize=12)
+        bars = plt.bar(fields, scores, color=sns.color_palette("viridis", len(fields)))
+        plt.title('Average LLM Similarity Scores by Field (Aggregate)', fontsize=14, pad=20)
+        plt.xlabel('Field', fontsize=12)
+        plt.ylabel('Average Score', fontsize=12)
+        plt.ylim(0, 1)
+        plt.xticks(rotation=45, ha='right')
         for bar in bars:
             height = bar.get_height()
             plt.text(bar.get_x() + bar.get_width()/2., height,
-                             f'{height:.2f}s',
+                             f'{height:.2f}',
                              ha='center', va='bottom')
-        self._save_plot('processing_time_bar.png')
+        self._save_plot('avg_llm_similarity_metrics_bar.png')
 
-        # Histogram for Individual Processing Times (if available)
-        # This data comes from 'detailed_results' typically, not 'aggregate_metrics'
-        # So this part should be moved to a detailed plot method.
-        # For now, commenting out as it assumes a different data source than 'metrics' dict
-        # individual_times = metrics.get('individual_processing_times', [])
-        # if individual_times:
-        #     numeric_individual_times = pd.to_numeric(individual_times, errors='coerce').dropna()
-        #     if not numeric_individual_times.empty:
-        #         plt.figure(figsize=(10, 6))
-        #         sns.histplot(numeric_individual_times, kde=True, bins=10, color=sns.color_palette("husl", 1)[0])
-        #         plt.title('Distribution of Individual Processing Times', fontsize=14, pad=20)
-        #         plt.xlabel('Time (seconds)', fontsize=12)
-        #         plt.ylabel('Frequency', fontsize=12)
-        #         self._save_plot('processing_time_distribution_hist.png')
-        #     else:
-        #         logger.warning("Individual processing times are not numeric or are empty after conversion.")
-        # else:
-        #     logger.warning("Individual processing times not found in metrics for histogram.")
+        # Pie Chart for Proportion of LLM Similarity
+        if scores and sum(scores) > 0:
+            plt.figure(figsize=(9, 9))
+            plt.pie(scores, labels=fields, autopct='%1.1f%%', startangle=90,
+                             colors=sns.color_palette("viridis", len(fields)))
+            plt.title('Proportion of Average LLM Similarity Across Fields (Aggregate)', fontsize=14, pad=20)
+            self._save_plot('proportion_llm_similarity_pie.png')
+        else:
+            logger.warning("Sum of LLM similarity scores is zero or no scores, skipping aggregate LLM similarity pie chart.")
 
+    def plot_processing_time_distribution(self, df_detailed: pd.DataFrame): # Changed parameter name and type hint
+        """
+        Generates a distribution plot (KDE or histogram) for processing time from detailed results.
+        """
+        self._set_plot_directory("processing_metrics") # Set subdirectory
 
+        # Ensure 'processing_metrics' data exists in the detailed results DataFrame
+        if 'processing_time' not in df_detailed.columns or df_detailed['processing_time'].isnull().all():
+            logger.warning("No valid 'processing_time' data found in detailed results for plotting distribution. Skipping processing time plot.")
+            return
+
+        # Filter out None/NaN values, and potentially zero if they are not meaningful (e.g., if default 0.0 implies missing)
+        # Assuming 0.0 might be a legitimate time if actually measured as very fast, but if it implies 'missing',
+        # you might want to filter those out too. For now, we only filter NaNs/None.
+        processing_times_data = df_detailed['processing_time'].dropna()
+
+        if processing_times_data.empty:
+            logger.warning("No non-null processing_time data after dropping missing values. Skipping processing time plot.")
+            return
+
+        logger.info(f"Plotting processing time distribution for {len(processing_times_data)} samples.")
+
+        plt.figure(figsize=(10, 6))
+        
+        # Use histplot for a histogram or kdeplot for a smoothed density estimate
+        # A histogram is often clearer for initial understanding of distribution.
+        sns.histplot(processing_times_data, kde=True, bins=20, color='skyblue') 
+        # sns.kdeplot(processing_times_data, fill=True, color='skyblue') # Alternative for KDE plot
+
+        plt.title('Distribution of Processing Time', fontsize=16)
+        plt.xlabel('Processing Time (seconds)', fontsize=12)
+        plt.ylabel('Frequency', fontsize=12) # Or 'Density' if using kdeplot
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+        # Add mean and std dev lines to the plot for context
+        mean_time = processing_times_data.mean()
+        std_time = processing_times_data.std()
+        
+        if not np.isnan(mean_time):
+            plt.axvline(mean_time, color='red', linestyle='--', label=f'Mean: {mean_time:.2f}s')
+            if not np.isnan(std_time):
+                plt.axvline(mean_time + std_time, color='orange', linestyle=':', label=f'Std Dev: {std_time:.2f}s')
+                plt.axvline(mean_time - std_time, color='orange', linestyle=':')
+        
+        plt.legend()
+        self._save_plot('processing_time_distribution.png')
+        
     def plot_rouge_scores(self, metrics: Dict[str, Any]):
-        """Plot ROUGE scores using grouped bar and line charts."""
+        """
+        Generates bar and line plots for ROUGE scores (ROUGE-1, ROUGE-2, ROUGE-L) across all comparable text fields.
+        Updated to use flat `metrics` dictionary directly and fix ROUGE type string formatting.
+        """
         self._set_plot_directory("rouge_metrics") # Set subdirectory
 
         rouge_data_by_field = {}
         # Iterate through metrics to find ROUGE scores like 'field_rouge_1_mean'
+        rouge_types_suffix = ['_rouge_1_mean', '_rouge_2_mean', '_rouge_l_mean']
+
         for key, value in metrics.items():
-            match = re.match(r'(.+)_(rouge_1|rouge_2|rouge_l)_mean$', key)
-            if match:
-                field_name = match.group(1).replace('_', ' ').title()
-                rouge_type = match.group(2).replace('_', ' ').upper()
-                if field_name not in rouge_data_by_field:
-                    rouge_data_by_field[field_name] = {}
-                rouge_data_by_field[field_name][rouge_type] = value
-        
+            for suffix in rouge_types_suffix:
+                if key.endswith(suffix):
+                    field_name = key.replace(suffix, '').replace('_', ' ').title()
+                    # FIX: Change to replace '_' with '-' for consistency with ROUGE labels
+                    rouge_type = suffix.replace('_mean', '').lstrip('_').replace('_', '-').upper()
+                    if field_name not in rouge_data_by_field:
+                        rouge_data_by_field[field_name] = {}
+                    rouge_data_by_field[field_name][rouge_type] = value
+                    break # Move to next key once found
+
         if not rouge_data_by_field:
             logger.warning("No ROUGE scores to plot from aggregate metrics.")
             return
         
         fields = list(rouge_data_by_field.keys())
-        rouge_types = ['ROUGE-1', 'ROUGE-2', 'ROUGE-L'] # Consistent order
+        rouge_types = ['ROUGE-1', 'ROUGE-2', 'ROUGE-L'] # Consistent order for plotting
 
         # Prepare data for plotting
         plot_data = []
@@ -249,7 +283,7 @@ class Visualizer:
 
         logger.info(f"Plotting ROUGE scores for fields: {fields}")
 
-        # Grouped Bar Chart for ROUGE Scores
+        # Grouped Bar Chart
         plt.figure(figsize=(14, 7))
         ax = sns.barplot(x='Field', y='Score', hue='ROUGE Type', data=df_plot, palette='viridis')
         plt.title('ROUGE Scores by Field', fontsize=14, pad=20)
@@ -274,15 +308,11 @@ class Visualizer:
         plt.ylim(0, 1)
         self._save_plot('rouge_scores_line.png')
 
+
     def plot_keyword_similarity(self, metrics: Dict[str, Any]):
-        """Plot keyword similarity metrics using a bar chart."""
+        """Plot keyword similarity metrics using a bar chart. Updated to use flat `metrics` dictionary."""
         self._set_plot_directory("set_similarity_metrics") # Set subdirectory
 
-        # Dynamically find mean Jaccard for any 'jaccard_mean' that might represent sets (like keywords)
-        # This will need to be flexible. For now, let's assume one main "set similarity"
-        # based on the example 'specified_matter_jaccard_mean' or 'keywords_jaccard_mean'
-        
-        # We need to find all keys ending in '_jaccard_mean' and process them.
         jaccard_means = {}
         for key, value in metrics.items():
             if key.endswith('_jaccard_mean'):
@@ -307,8 +337,74 @@ class Visualizer:
         plt.xticks(rotation=45, ha='right')
         for container in ax.containers:
             ax.bar_label(container, fmt='%.2f')
-        self._save_plot('jaccard_similarity_bar.png')
+        self._save_plot('jaccard_similarity_bar.png');
+    def plot_completeness_metrics(self, metrics: Dict[str, Any], df_detailed: pd.DataFrame):
+        """
+        Plots completeness metrics: mean completeness from aggregate and a categorized distribution.
+        """
+        self._set_plot_directory("completeness_metrics")
 
+        # Plot mean completeness score (from aggregate metrics)
+        # Correctly access nested completeness metrics
+        completeness_aggregate = metrics.get('completeness_metrics', {})
+        mean_completeness_score = completeness_aggregate.get('mean_completeness_score')
+
+        if mean_completeness_score is not None:
+            logger.info(f"Plotting mean completeness score: {mean_completeness_score:.2f}")
+            plt.figure(figsize=(8, 5))
+            bars = plt.bar(['Mean Completeness Score'], [mean_completeness_score], color='lightcoral')
+            plt.title('Average Completeness Score', fontsize=14, pad=20)
+            plt.ylabel('Score (0-100)', fontsize=12)
+            plt.ylim(0, 100) # Assuming the score is out of 100
+            for bar in bars:
+                height = bar.get_height()
+                plt.text(bar.get_x() + bar.get_width()/2., height,
+                                 f'{height:.2f}',
+                                 ha='center', va='bottom')
+            self._save_plot('mean_completeness_score_bar.png')
+        else:
+            logger.warning("Mean completeness score not found in aggregate metrics. Skipping mean completeness plot.")
+
+        # Plot categorized distribution of completeness scores (from detailed results)
+        if 'completeness_score' in df_detailed.columns and not df_detailed['completeness_score'].isnull().all():
+            completeness_data = df_detailed['completeness_score'].dropna()
+            if not completeness_data.empty:
+                logger.info(f"Plotting categorized completeness score distribution for {len(completeness_data)} samples.")
+                
+                # Define bins for categorization
+                bins = [0, 50, 75, 100.01] # Low (0-50), Medium (50-75), High (75-100)
+                labels = ['Low (0-50)', 'Medium (50-75)', 'High (75-100)']
+                
+                # Categorize scores
+                completeness_categories = pd.cut(completeness_data, bins=bins, labels=labels, right=False)
+                
+                # Calculate counts and percentages
+                category_counts = completeness_categories.value_counts(sort=False)
+                category_percentages = (category_counts / len(completeness_data)) * 100
+                
+                if not category_percentages.empty:
+                    plt.figure(figsize=(10, 6))
+                    bars = plt.bar(category_percentages.index, category_percentages.values, color=sns.color_palette("pastel"))
+                    plt.title('Percentage of Records by Completeness Score Range', fontsize=16)
+                    plt.xlabel('Completeness Score Range', fontsize=12)
+                    plt.ylabel('Percentage of Records (%)', fontsize=12)
+                    plt.ylim(0, 100)
+                    plt.xticks(rotation=45, ha='right')
+                    plt.grid(axis='y', linestyle='--', alpha=0.7)
+                    
+                    for bar in bars:
+                        height = bar.get_height()
+                        plt.text(bar.get_x() + bar.get_width()/2., height,
+                                 f'{height:.1f}%',
+                                 ha='center', va='bottom')
+                    
+                    self._save_plot('completeness_score_categorized_distribution.png')
+                else:
+                    logger.warning("No completeness data after categorization. Skipping categorized distribution plot.")
+            else:
+                logger.warning("No non-null completeness_score data in detailed results for distribution plot.")
+        else:
+            logger.warning("'completeness_score' column not found or is all null in detailed results. Skipping completeness distribution plot.")
 
     def create_all_visualizations(self, metrics: Dict[str, Any]):
         """Create all aggregate-level visualizations from the metrics."""
@@ -317,9 +413,11 @@ class Visualizer:
         try:
             self.plot_categorical_metrics(metrics)
             self.plot_text_similarity_metrics(metrics)
-            self.plot_processing_time(metrics)
-            self.plot_rouge_scores(metrics)
+            self.plot_llm_similarity_metrics(metrics)
+            # Removed plot_processing_time(metrics)
+            self.plot_rouge_scores(metrics) # This name is correct as per user's file
             self.plot_keyword_similarity(metrics) # This now handles all Jaccard means
+            self.plot_completeness_metrics(metrics=metrics, df_detailed=pd.DataFrame()) # Call for aggregate completeness
 
             # Save metrics as JSON for reference
             with open(self.current_plot_dir / 'aggregate_metrics.json', 'w') as f:
@@ -343,6 +441,16 @@ class Visualizer:
             # Directly use the provided 'aggregate_metrics' dictionary
             metrics = evaluation_results.get('aggregate_metrics', {})
 
+            if 'processing_metrics' in df.columns:
+                # Check if processing_metrics column contains dictionaries
+                if not df['processing_metrics'].empty and isinstance(df['processing_metrics'].iloc[0], dict):
+                    df['processing_time'] = df['processing_metrics'].apply(lambda x: x.get('processing_time') if isinstance(x, dict) else np.nan)
+                    logger.info("Flattened 'processing_metrics' to 'processing_time' column for plotting.")
+                else:
+                    logger.warning("'processing_metrics' column found but does not contain dictionaries. Cannot extract 'processing_time'.")
+            else:
+                logger.warning("'processing_metrics' column not found in DataFrame for flattening. Processing time plots might be affected.")
+
             if df.empty:
                 logger.warning("Detailed results DataFrame is empty. Skipping detailed visualizations.")
             
@@ -355,23 +463,17 @@ class Visualizer:
 
             # Call detailed-level plots, which will also set their own sub-folders
             if not df.empty:
-                # These methods will set their own subdirectories using _set_plot_directory
-                self._plot_event_accuracy_comparison(metrics) # Pass metrics for accurate parsing
-                self._plot_text_similarity_distribution(df)
+                self.plot_processing_time_distribution(df)
+                self.plot_completeness_metrics(metrics=metrics, df_detailed=df) # Call for detailed completeness
                 self._plot_llm_similarity_scores(df)
-                self._plot_correlation_heatmap(df)
-                self._plot_processing_time_trend(df)
-                self._create_detailed_plots_from_df(df) # Overall bar chart from detailed results mean
-
-            logger.info(f"All visualizations created in {self.base_output_dir}")
 
         except Exception as e:
             logger.error(f"Error creating visualizations: {e}")
             raise
         finally:
-            # Restore the original base_output_dir for subsequent calls if needed
+            # Restore original base directory
             self.base_output_dir = original_base_output_dir
-            self.current_plot_dir = self.base_output_dir # Reset current plot dir
+            logger.info("Finished visualization creation process.")
 
     def _plot_event_accuracy_comparison(self, metrics: Dict[str, Any]):
         """
@@ -593,6 +695,78 @@ class Visualizer:
         else:
             logger.warning("No valid data for LLM similarity pie chart or sum of scores is zero.")
 
+    def _plot_llm_similarity_scores(self, df: pd.DataFrame):
+        """Plot LLM similarity scores for each text field using bar and pie charts."""
+        self._set_plot_directory("detailed_distributions/llm_similarity") # New subdirectory
+
+        llm_similarity_cols = [col for col in df.columns if col.endswith('_llm_similarity')]
+
+        llm_similarity_data = []
+        for col_name in llm_similarity_cols:
+            cleaned_llm_data = pd.to_numeric(df[col_name], errors='coerce').dropna()
+            if not cleaned_llm_data.empty:
+                field_name = col_name.replace('_llm_similarity', '').replace('_', ' ').title()
+                llm_similarity_data.append({'Field': field_name, 'Average Similarity Score': cleaned_llm_data.mean()})
+                
+                # Plot individual distributions (KDE, Hist) for each LLM similarity column
+                try:
+                    self._set_plot_directory(f"detailed_distributions/llm_similarity/{field_name.replace(' ', '_')}")
+                    
+                    plt.figure(figsize=(10, 5))
+                    sns.kdeplot(data=cleaned_llm_data, fill=True, alpha=0.6, clip=(0, 1), color='purple')
+                    plt.title(f'Distribution of LLM Similarity - {field_name} (KDE Plot)', fontsize=14)
+                    plt.xlabel('Similarity Score')
+                    plt.ylabel('Density')
+                    plt.xlim(0, 1)
+                    plt.tight_layout()
+                    self._save_plot(f"{field_name}_llm_similarity_distribution_kde.png")
+                    
+                    plt.figure(figsize=(10, 5))
+                    plt.hist(cleaned_llm_data, bins=np.linspace(0, 1, 21), edgecolor='black', alpha=0.7, color='purple')
+                    plt.title(f'Distribution of LLM Similarity - {field_name} (Histogram)', fontsize=14)
+                    plt.xlabel('Similarity Score')
+                    plt.ylabel('Frequency')
+                    plt.xlim(0, 1)
+                    plt.tight_layout()
+                    self._save_plot(f"{field_name}_llm_similarity_distribution_hist.png")
+
+                except Exception as e:
+                    logger.warning(f"Individual LLM Similarity plot failed for {col_name}: {e}")
+            else:
+                logger.debug(f"LLM similarity column '{col_name}' is empty or contains only non-numeric/null values — skipping for detailed plots.")
+
+        # Reset plot directory to the parent for combined plots if any
+        self._set_plot_directory("detailed_distributions/llm_similarity")
+
+        if not llm_similarity_data:
+            logger.warning("No LLM similarity data available to plot overall detailed summary.")
+            return
+
+        logger.info("Plotting overall detailed LLM similarity scores (bar and pie charts).")
+        mean_df = pd.DataFrame(llm_similarity_data)
+
+        # Bar Chart for Average LLM Similarity from Detailed Results
+        plt.figure(figsize=(10, 6))
+        ax = sns.barplot(x='Field', y='Average Similarity Score', data=mean_df, hue='Field', palette="viridis", legend=False)
+        plt.title('Average LLM Similarity Scores by Field (Detailed Results Summary)', fontsize=14, pad=20)
+        plt.ylabel('Average Similarity Score', fontsize=12)
+        plt.ylim(0,1)
+        plt.xticks(rotation=45, ha='right')
+        for container in ax.containers:
+            ax.bar_label(container, fmt='%.2f')
+        plt.tight_layout()
+        self._save_plot('llm_similarity_scores_detailed_bar.png')
+
+        # Pie Chart for Proportion of Average LLM Similarity from Detailed Results
+        if not mean_df.empty and mean_df['Average Similarity Score'].sum() > 0:
+            plt.figure(figsize=(9, 9))
+            plt.pie(mean_df['Average Similarity Score'], labels=mean_df['Field'], autopct='%1.1f%%', startangle=90,
+                             colors=sns.color_palette("viridis", len(mean_df)))
+            plt.title('Proportion of Average LLM Similarity by Field (Detailed Results Summary)', fontsize=14, pad=20)
+            plt.tight_layout()
+            self._save_plot('llm_similarity_scores_detailed_pie.png')
+        else:
+            logger.warning("No valid data for detailed LLM similarity pie chart or sum of scores is zero.")
 
     def _plot_correlation_heatmap(self, df: pd.DataFrame):
         """Plot correlation heatmap of all dynamically identified numeric metrics."""
@@ -721,136 +895,3 @@ if __name__ == "__main__":
         shutil.rmtree(test_output_dir)
         print(f"Cleaned up existing directory: {test_output_dir}")
 
-    # Sample evaluation results - adapted to the flat aggregate_metrics.json structure
-    sample_evaluation_results = {
-        'aggregate_metrics': {
-            # Categorical metrics (flat structure)
-            'event_type_strict_accuracy': 0.6,
-            'event_type_fuzzy_accuracy': 0.631,
-            'event_sub_type_strict_accuracy': 0.4,
-            'event_sub_type_fuzzy_accuracy': 0.643,
-            'state_of_victim_strict_accuracy': 0.8,
-            'victim_gender_strict_accuracy': 0.9,
-            
-            # Text similarity metrics (flat structure, with '_mean' suffix)
-            'specified_matter_jaccard_mean': 0.547,
-            'specified_matter_bleu_mean': 0.489,
-            'specified_matter_rouge_1_mean': 0.614,
-            'specified_matter_rouge_2_mean': 0.560,
-            'specified_matter_rouge_l_mean': 0.595,
-            'specified_matter_llm_similarity_mean': 0.920,
-            
-            'date_reference_jaccard_mean': 0.8,
-            'date_reference_bleu_mean': 0.8,
-            'date_reference_rouge_1_mean': 0.8,
-            'date_reference_rouge_2_mean': 0.8,
-            'date_reference_rouge_l_mean': 0.8,
-            'date_reference_llm_similarity_mean': 0.8,
-
-            'frequency_jaccard_mean': 0.9,
-            'frequency_bleu_mean': 0.9,
-            'frequency_rouge_1_mean': 0.9,
-            'frequency_rouge_2_mean': 0.9,
-            'frequency_rouge_l_mean': 0.9,
-            'frequency_llm_similarity_mean': 0.9,
-
-            # Add more text fields as needed for robustness
-            'identification_jaccard_mean': 0.85,
-            'identification_bleu_mean': 0.231, # Lower BLEU to test variability
-            'identification_rouge_1_mean': 0.866,
-            'identification_rouge_2_mean': 0.600,
-            'identification_rouge_l_mean': 0.866,
-            'identification_llm_similarity_mean': 0.895,
-
-            'object_involved_jaccard_mean': 0.77,
-            'object_involved_bleu_mean': 0.581,
-            'object_involved_rouge_1_mean': 0.733,
-            'object_involved_rouge_2_mean': 0.700,
-            'object_involved_rouge_l_mean': 0.733,
-            'object_involved_llm_similarity_mean': 0.870,
-            
-            # Processing metrics (assumed top-level)
-            'mean_processing_time': 1.25,
-            
-            # Additional Jaccard-like metrics (for plot_keyword_similarity)
-            'keywords_jaccard_mean': 0.70, # This was in old structure, adding back for demo
-            'tags_jaccard_mean': 0.65 # Another example
-        },
-        'detailed_results': [
-            {
-                'id': 'rec1', 'event_type_accuracy': 1.0, 'event_sub_type_accuracy': 1.0, 'severity_accuracy': 1.0,
-                'specified_matter_jaccard': 0.7, 'specified_matter_bleu': 0.65, 'specified_matter_rouge_1': 0.6, 'specified_matter_rouge_2': 0.5, 'specified_matter_rouge_l': 0.55, 'specified_matter_llm_similarity': 0.8,
-                'date_reference_jaccard': 0.8, 'date_reference_bleu': 0.75, 'date_reference_rouge_1': 0.7, 'date_reference_rouge_2': 0.6, 'date_reference_rouge_l': 0.65, 'date_reference_llm_similarity': 0.85,
-                'keywords_jaccard': 0.75, 'processing_time': 1.1
-            },
-            {
-                'id': 'rec2', 'event_type_accuracy': 0.0, 'event_sub_type_accuracy': 1.0, 'severity_accuracy': 0.0,
-                'specified_matter_jaccard': 0.6, 'specified_matter_bleu': 0.55, 'specified_matter_rouge_1': 0.5, 'specified_matter_rouge_2': 0.4, 'specified_matter_rouge_l': 0.45, 'specified_matter_llm_similarity': 0.7,
-                'date_reference_jaccard': 0.7, 'date_reference_bleu': 0.65, 'date_reference_rouge_1': 0.6, 'date_reference_rouge_2': 0.5, 'date_reference_rouge_l': 0.55, 'date_reference_llm_similarity': 0.78,
-                'keywords_jaccard': 0.65, 'processing_time': 1.3
-            },
-            {
-                'id': 'rec3', 'event_type_accuracy': 1.0, 'event_sub_type_accuracy': 0.0, 'severity_accuracy': 1.0,
-                'specified_matter_jaccard': 0.8, 'specified_matter_bleu': 0.75, 'specified_matter_rouge_1': 0.7, 'specified_matter_rouge_2': 0.6, 'specified_matter_rouge_l': 0.65, 'specified_matter_llm_similarity': 0.88,
-                'date_reference_jaccard': 0.9, 'date_reference_bleu': 0.85, 'date_reference_rouge_1': 0.8, 'date_reference_rouge_2': 0.7, 'date_reference_rouge_l': 0.75, 'date_reference_llm_similarity': 0.92,
-                'keywords_jaccard': 0.80, 'processing_time': 1.2
-            },
-            {
-                'id': 'rec4', 'event_type_accuracy': 0.0, 'event_sub_type_accuracy': 0.0, 'severity_accuracy': 0.0,
-                'specified_matter_jaccard': 'not specified', 'specified_matter_bleu': 0.45, 'specified_matter_rouge_1': 0.4, 'specified_matter_rouge_2': 0.3, 'specified_matter_rouge_l': 0.35, 'specified_matter_llm_similarity': 0.6,
-                'date_reference_jaccard': 0.6, 'date_reference_bleu': 0.55, 'date_reference_rouge_1': 0.5, 'date_reference_rouge_2': 0.4, 'date_reference_rouge_l': 0.45, 'date_reference_llm_similarity': 0.7,
-                'keywords_jaccard': 0.55, 'processing_time': 1.5
-            },
-            {
-                'id': 'rec5', 'event_type_accuracy': 1.0, 'event_sub_type_accuracy': 1.0, 'severity_accuracy': 1.0,
-                'specified_matter_jaccard': 0.9, 'specified_matter_bleu': 0.85, 'specified_matter_rouge_1': 0.8, 'specified_matter_rouge_2': 0.7, 'specified_matter_rouge_l': 0.75, 'specified_matter_llm_similarity': 0.95,
-                'date_reference_jaccard': 0.95, 'date_reference_bleu': 0.9, 'date_reference_rouge_1': 0.85, 'date_reference_rouge_2': 0.75, 'date_reference_rouge_l': 0.8, 'date_reference_llm_similarity': 0.98,
-                'keywords_jaccard': 0.90, 'processing_time': 1.0
-            },
-            {
-                'id': 'rec6', 'event_type_accuracy': 1.0, 'event_sub_type_accuracy': 1.0, 'severity_accuracy': 1.0,
-                'specified_matter_jaccard': 0.85, 'specified_matter_bleu': 0.8, 'specified_matter_rouge_1': 0.75, 'specified_matter_rouge_2': 0.65, 'specified_matter_rouge_l': 0.7, 'specified_matter_llm_similarity': 0.9,
-                'date_reference_jaccard': 0.88, 'date_reference_bleu': 0.82, 'date_reference_rouge_1': 0.78, 'date_reference_rouge_2': 0.68, 'date_reference_rouge_l': 0.73, 'date_reference_llm_similarity': 0.93,
-                'keywords_jaccard': 0.85, 'processing_time': 1.6
-            },
-            {
-                'id': 'rec7', 'event_type_accuracy': 0.0, 'event_sub_type_accuracy': 0.0, 'severity_accuracy': 0.0,
-                'specified_matter_jaccard': 0.5, 'specified_matter_bleu': 0.4, 'specified_matter_rouge_1': 0.3, 'specified_matter_rouge_2': 0.2, 'specified_matter_rouge_l': 0.25, 'specified_matter_llm_similarity': 0.5,
-                'date_reference_jaccard': 0.55, 'date_reference_bleu': 0.45, 'date_reference_rouge_1': 0.4, 'date_reference_rouge_2': 0.3, 'date_reference_rouge_l': 0.35, 'date_reference_llm_similarity': 0.6,
-                'keywords_jaccard': 0.45, 'processing_time': 0.9
-            }
-        ]
-    }
-
-    visualizer = Visualizer()
-
-    try:
-        print(f"\nAttempting to create visualizations in: {test_output_dir}")
-        visualizer.create_visualizations(sample_evaluation_results, test_output_dir)
-        print(f"\nVisualizations creation process completed. Checking generated files...")
-
-        # List files in the output directory and its subdirectories
-        generated_files = []
-        for root, dirs, files in os.walk(test_output_dir):
-            for file in files:
-                generated_files.append(Path(root) / file)
-
-        if generated_files:
-            print(f"\nSuccessfully generated {len(generated_files)} files in '{test_output_dir}':")
-            for f in generated_files:
-                print(f" - {f.relative_to(test_output_dir)}")
-            print("\nVerification successful: Plots were generated and likely structured.")
-        else:
-            print("\nVerification failed: No plots were generated.")
-            
-    except Exception as e:
-        print(f"\nAn error occurred during visualization creation: {e}")
-        import traceback
-        traceback.print_exc() # Print full traceback for debugging
-        print("Verification failed: Plots were NOT generated due to an error.")
-
-    finally:
-        # Optional: Keep the directory for manual inspection or remove it
-        # shutil.rmtree(test_output_dir)
-        # print(f"\nCleaned up test directory: {test_output_dir}")
-        pass

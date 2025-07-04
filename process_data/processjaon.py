@@ -4,7 +4,7 @@ import os
 
 def normalize_value(value):
     """Normalize values like 'no', 'none', 'not applicable' to 'not_specified'."""
-    if isinstance(value, str) and value.strip().lower() in {'no', 'none', 'not applicable', 'not_specified'}:
+    if isinstance(value, str) and value.strip().lower() in {'no', 'none', 'not applicable', 'not_specified', 'adult'}:
         return "not_specified"
     return value
 

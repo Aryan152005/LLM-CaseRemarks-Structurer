@@ -6,6 +6,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from nltk.tokenize import word_tokenize # <-- Keep this line (added in previous step)
 from rouge_score import rouge_scorer
 from loguru import logger
 # Import both schemas
@@ -13,14 +14,26 @@ from schema import ProcessedOutput, GroundTruthOutput
 import json
 import pandas as pd
 from sklearn.metrics import jaccard_score
-from rouge import Rouge
+# from rouge import Rouge # <-- REMOVE OR COMMENT OUT THIS LINE
 import requests
 import re
 import os # For path manipulation
-
+import sys
 # Import for plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+sys.setrecursionlimit(5000)
+
+
+COMPLETENESS_CHECK_FIELDS = [
+    "event_type", "event_sub_type", "state_of_victim", "victim_gender",
+    "specified_matter", "date_reference", "frequency", "repeat_incident",
+    "identification", "injury_type", "victim_age", "victim_relation",
+    "incident_location", "area", "suspect_description", "object_involved",
+    "date_of_birth", "used_weapons", "offender_relation", "mode_of_threat",
+    "need_ambulance", "children_involved", "generated_event_sub_type_detail"
+]
 
 class LLMJudge:
     def __init__(self, ollama_base_url: str = "http://localhost:11434"):
@@ -147,7 +160,7 @@ class Evaluator:
     def __init__(self, ground_truth_file: str):
         self.ground_truth = self._load_ground_truth(ground_truth_file)
         self.llm_judge = LLMJudge()
-        self.rouge = Rouge()
+        # self.rouge = Rouge()
         self.scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
         self.vectorizer = TfidfVectorizer()
         self.smoothing_function = SmoothingFunction()
@@ -198,12 +211,24 @@ class Evaluator:
             logger.error(f"Unexpected error loading ground truth: {e}")
             raise
 
-    def _calculate_text_similarity(self, text1: str, text2: str) -> Dict[str, float]:
-        """Calculate various text similarity metrics"""
-        text1 = text1 if text1 is not None else ""
-        text2 = text2 if text2 is not None else ""
+    
 
-        if not text1.strip() and not text2.strip():
+    def _calculate_text_similarity(self, text1: str, text2: str) -> Dict[str, float]:
+        """
+        Calculate various text similarity metrics using rouge-score for ROUGE and
+        adding explicit string conversion for robustness.
+        """
+        # Ensure texts are always strings, converting None to empty string
+        text1_safe = str(text1) if text1 is not None else ""
+        text2_safe = str(text2) if text2 is not None else ""
+
+        # Normalize texts by stripping whitespace. This handles strings that are
+        # just spaces or contain only whitespace characters.
+        text1_stripped = text1_safe.strip()
+        text2_stripped = text2_safe.strip()
+
+        # Handle cases where both texts are empty after stripping
+        if not text1_stripped and not text2_stripped:
             return {
                 'jaccard': 1.0,
                 'bleu': 1.0,
@@ -212,8 +237,9 @@ class Evaluator:
                 'rouge_l': 1.0,
                 'llm_similarity': 1.0
             }
-        elif not text1.strip() or not text2.strip():
-             return {
+        # Handle cases where one text is empty and the other is not
+        elif not text1_stripped or not text2_stripped:
+            return {
                 'jaccard': 0.0,
                 'bleu': 0.0,
                 'rouge_1': 0.0,
@@ -221,39 +247,101 @@ class Evaluator:
                 'rouge_l': 0.0,
                 'llm_similarity': 0.0
             }
-            
-        tokens1 = set(text1.lower().split())
-        tokens2 = set(text2.lower().split())
-        
-        intersection = len(tokens1.intersection(tokens2))
-        union = len(tokens1.union(tokens2))
+
+        # --- Jaccard Similarity ---
+        # Convert to lowercase and tokenize using NLTK for better results
+        tokens1_list = word_tokenize(text1_stripped.lower()) # Changed from .split()
+        tokens2_list = word_tokenize(text2_stripped.lower()) # Changed from .split()
+
+        # Convert to set for Jaccard calculation
+        tokens1_set = set(tokens1_list)
+        tokens2_set = set(tokens2_list)
+
+        intersection = len(tokens1_set.intersection(tokens2_set))
+        union = len(tokens1_set.union(tokens2_set))
         jaccard = intersection / union if union > 0 else 0.0
-        
-        bleu_ref_tokens = text1.lower().split()
-        bleu_hyp_tokens = text2.lower().split()
-        
+
+        # --- BLEU Score ---
+        # NLTK's sentence_bleu expects a list of reference token lists.
+        # Use the already tokenized lists for BLEU
+        bleu_ref_tokens = tokens1_list # Using word_tokenize output
+        bleu_hyp_tokens = tokens2_list # Using word_tokenize output
+
+        # Check if either token list is empty before calculating BLEU
         if bleu_ref_tokens and bleu_hyp_tokens:
             bleu = sentence_bleu([bleu_ref_tokens], bleu_hyp_tokens, smoothing_function=self.smoothing_function.method1)
         else:
-            bleu = 0.0
-        
-        rouge_scores = {'rouge-1': {'f': 0.0}, 'rouge-2': {'f': 0.0}, 'rouge-l': {'f': 0.0}}
+            bleu = 0.0 # Cannot calculate BLEU if one or both token lists are empty
+
+        # --- ROUGE Scores (using rouge-score library) ---
+        rouge_scores_output = {'rouge-1': {'f': 0.0}, 'rouge-2': {'f': 0.0}, 'rouge-l': {'f': 0.0}}
         try:
-            rouge_scores = self.rouge.get_scores(text1, text2)[0]
-        except ValueError as e:
-            logger.warning(f"ROUGE calculation error: {e} for '{text1[:50]}' vs '{text2[:50]}'")
-        
-        llm_score, llm_explanation = self.llm_judge.is_similar(text1, text2)
-        llm_score = llm_score if llm_score is not None else 0.0
-        
+            # Use self.scorer (from rouge_scorer.RougeScorer)
+            scores = self.scorer.score(text1_stripped, text2_stripped)
+
+            # Map the rouge-score output format to your desired format
+            rouge_scores_output['rouge-1']['f'] = scores['rouge1'].fmeasure
+            rouge_scores_output['rouge-2']['f'] = scores['rouge2'].fmeasure
+            rouge_scores_output['rouge-l']['f'] = scores['rougeL'].fmeasure # 'rougeL' is the key for rouge-score
+
+        except Exception as e: # Catch broader exceptions for robustness
+            logger.warning(f"ROUGE calculation error with rouge-score: {e} for '{text1_stripped[:50]}' vs '{text2_stripped[:50]}'")
+
+        # --- LLM Similarity ---
+        llm_score, _ = self.llm_judge.is_similar(text1_stripped, text2_stripped)
+        llm_score = llm_score if llm_score is not None else 0.0 # Ensure it's a float
+
         return {
             'jaccard': jaccard,
             'bleu': bleu,
-            'rouge_1': rouge_scores['rouge-1']['f'],
-            'rouge_2': rouge_scores['rouge-2']['f'],
-            'rouge_l': rouge_scores['rouge-l']['f'],
+            'rouge_1': rouge_scores_output['rouge-1']['f'],
+            'rouge_2': rouge_scores_output['rouge-2']['f'],
+            'rouge_l': rouge_scores_output['rouge-l']['f'],
             'llm_similarity': llm_score
         }
+    
+    def _is_field_complete(self, value: Any) -> bool:
+        """Determines if a field value is considered 'complete' based on user's definition."""
+        if value is None:
+            return False
+        if isinstance(value, str):
+            stripped_value = value.strip().lower()
+            return stripped_value not in ["", "not specified", "not applicable"]
+        return True
+    
+    def _calculate_completeness_score(self, processed_output: ProcessedOutput, ground_truth: GroundTruthOutput) -> float:
+        """
+        Calculates a completeness score for a single record.
+        The score is based on the percentage of non-empty comparable fields in the processed output
+        that are also non-empty in the ground truth.
+        """
+        populated_fields_in_gt = 0
+        populated_and_matched_in_processed = 0
+
+        for field in COMPLETENESS_CHECK_FIELDS:
+            gt_value = getattr(ground_truth, field, None)
+            processed_value = getattr(processed_output, field, None)
+
+            # Consider a field 'populated' if its value is not None, not an empty string/list, and not "not specified"
+            is_gt_populated = gt_value is not None and \
+                              (str(gt_value).strip().lower() != 'not specified' if isinstance(gt_value, str) else True) and \
+                              (gt_value != "" if isinstance(gt_value, str) else True)
+                              
+            is_processed_populated = processed_value is not None and \
+                                     (str(processed_value).strip().lower() != 'not specified' if isinstance(processed_value, str) else True) and \
+                                     (processed_value != "" if isinstance(processed_value, str) else True)
+
+            if is_gt_populated:
+                populated_fields_in_gt += 1
+                if is_processed_populated:
+                    populated_and_matched_in_processed += 1
+        
+        if populated_fields_in_gt == 0:
+            return 100.0 # If ground truth has no populated fields to check, consider it 100% complete
+        
+        # Score based on how many ground truth populated fields were also populated in processed output
+        completeness = (populated_and_matched_in_processed / populated_fields_in_gt) * 100
+        return completeness
 
     def _calculate_event_similarity(self, pred_type: str, pred_sub_type: str, 
                                      true_type: str, true_sub_type: str) -> Dict[str, float]:
@@ -369,12 +457,32 @@ class Evaluator:
                 
             if file_name_key not in self.ground_truth:
                 logger.warning(f"No ground truth found for {file_name_key}. Skipping evaluation for this prediction.")
-                continue
-                
+                # Initialize result dict for the current prediction if we are skipping for lack of ground truth
+                current_result = {'file_name': file_name_key}
+                current_result['processing_metrics'] = {'processing_time': pred.processing_time}
+                current_result['completeness_score'] = 0.0 # Assign 0 completeness if no GT to compare against
+                # Set all other metrics to 0 or appropriate default if no GT
+                current_result.update({
+                    'type_strict_match': 0.0, 'sub_type_strict_match': 0.0,
+                    'type_fuzzy_match': 0.0, 'sub_type_fuzzy_match': 0.0
+                })
+                for field in categorical_fields_for_accuracy:
+                    current_result[f'{field}_strict_match'] = 0.0
+                for field in comparable_text_fields:
+                    current_result[f"{field}_jaccard"] = 0.0
+                    current_result[f"{field}_bleu"] = 0.0
+                    current_result[f"{field}_rouge_1"] = 0.0
+                    current_result[f"{field}_rouge_2"] = 0.0
+                    current_result[f"{field}_rouge_l"] = 0.0
+                    current_result[f"{field}_llm_similarity"] = 0.0
+                results.append(current_result) # Add this skipped result to maintain structure
+                continue # Now continue with the next prediction
+
             true = self.ground_truth[file_name_key]
             
             # Initialize result dict for the current prediction
             current_result = {'file_name': file_name_key}
+            current_result['processing_metrics'] = {'processing_time': pred.processing_time}
 
             # Evaluate Event Type and Sub-type (categorical + fuzzy from LLM)
             # These values (type_strict_match, sub_type_strict_match, type_fuzzy_match, sub_type_fuzzy_match)
@@ -384,6 +492,10 @@ class Evaluator:
                 true.event_type, true.event_sub_type
             )
             current_result.update(event_metrics)
+            
+            # Calculate and add completeness score
+            completeness_score = self._calculate_completeness_score(pred, true)
+            current_result['completeness_score'] = completeness_score
 
             # Add strict categorical matches for ALL fields in categorical_fields_for_accuracy,
             # INCLUDING event_type and event_sub_type.
@@ -418,51 +530,62 @@ class Evaluator:
                 field_metrics = self._calculate_text_similarity(pred_text_clean, true_text_clean)
                 for metric, value in field_metrics.items():
                     current_result[f"{field}_{metric}"] = value
-            
+                
             results.append(current_result)
             
         if not results:
             logger.warning("No evaluation results to aggregate. Check if ground truth files match predictions.")
             return {'detailed_results': [], 'aggregate_metrics': {}}
+        else: # This 'else' block ensures df is always defined before use
+            df = pd.DataFrame(results)
+            
+            # Initialize aggregate_metrics
+            aggregate_metrics = {}
 
-        df = pd.DataFrame(results)
-        
-        # Initialize aggregate_metrics
-        aggregate_metrics = {}
+            # Aggregate event type and sub-type (now correctly picked from event_metrics via current_result)
+            # These columns will exist in the DataFrame because of current_result.update(event_metrics)
+            aggregate_metrics['event_type_strict_accuracy'] = df['type_strict_match'].mean() if 'type_strict_match' in df.columns else 0.0
+            aggregate_metrics['event_type_fuzzy_accuracy'] = df['type_fuzzy_match'].mean() if 'type_fuzzy_match' in df.columns else 0.0
+            aggregate_metrics['event_sub_type_strict_accuracy'] = df['sub_type_strict_match'].mean() if 'sub_type_strict_match' in df.columns else 0.0
+            aggregate_metrics['event_sub_type_fuzzy_accuracy'] = df['sub_type_fuzzy_match'].mean() if 'sub_type_fuzzy_match' in df.columns else 0.0
 
-        # Aggregate event type and sub-type (now correctly picked from event_metrics via current_result)
-        # These columns will exist in the DataFrame because of current_result.update(event_metrics)
-        aggregate_metrics['event_type_strict_accuracy'] = df['type_strict_match'].mean() if 'type_strict_match' in df.columns else 0.0
-        aggregate_metrics['event_type_fuzzy_accuracy'] = df['type_fuzzy_match'].mean() if 'type_fuzzy_match' in df.columns else 0.0
-        aggregate_metrics['event_sub_type_strict_accuracy'] = df['sub_type_strict_match'].mean() if 'sub_type_strict_match' in df.columns else 0.0
-        aggregate_metrics['event_sub_type_fuzzy_accuracy'] = df['sub_type_fuzzy_match'].mean() if 'sub_type_fuzzy_match' in df.columns else 0.0
+            # Aggregate other categorical fields (e.g., state_of_victim, victim_gender)
+            # This loop now correctly handles all fields in categorical_fields_for_accuracy,
+            # including event_type and event_sub_type whose strict matches were ensured above.
+            for field in categorical_fields_for_accuracy:
+                col_name = f"{field}_strict_match"
+                if col_name in df.columns:
+                    aggregate_metrics[f"{field}_strict_accuracy"] = df[col_name].mean()
+                else:
+                    aggregate_metrics[f"{field}_strict_accuracy"] = 0.0
 
-        # Aggregate other categorical fields (e.g., state_of_victim, victim_gender)
-        # This loop now correctly handles all fields in categorical_fields_for_accuracy,
-        # including event_type and event_sub_type whose strict matches were ensured above.
-        for field in categorical_fields_for_accuracy:
-            col_name = f"{field}_strict_match"
-            if col_name in df.columns:
-                aggregate_metrics[f"{field}_strict_accuracy"] = df[col_name].mean()
+            # Aggregate text similarity metrics
+            for field in comparable_text_fields:
+                for metric in ['jaccard', 'bleu', 'rouge_1', 'rouge_2', 'rouge_l', 'llm_similarity']:
+                    col = f"{field}_{metric}"
+                    if col in df.columns:
+                        aggregate_metrics[f"{field}_{metric}_mean"] = df[col].mean()
+            
+            # Aggregate completeness score
+            if 'completeness_score' in df.columns:
+                aggregate_metrics['completeness_metrics'] = {
+                    'mean_completeness_score': df['completeness_score'].mean(),
+                    'std_completeness_score': df['completeness_score'].std() if len(df['completeness_score']) > 1 else 0.0
+                }
             else:
-                aggregate_metrics[f"{field}_strict_accuracy"] = 0.0
+                aggregate_metrics['completeness_metrics'] = {
+                    'mean_completeness_score': 0.0,
+                    'std_completeness_score': 0.0
+                }
 
+            # Call the plotting function here
+            self.plot_event_metrics(df, output_dir) # Pass the DataFrame and output directory
 
-        # Aggregate text similarity metrics
-        for field in comparable_text_fields:
-            for metric in ['jaccard', 'bleu', 'rouge_1', 'rouge_2', 'rouge_l', 'llm_similarity']:
-                col = f"{field}_{metric}"
-                if col in df.columns:
-                    aggregate_metrics[f"{field}_{metric}_mean"] = df[col].mean()
-        
-        # Call the plotting function here
-        self.plot_event_metrics(df, output_dir) # Pass the DataFrame and output directory
-
-        return {
-            'detailed_results': results,
-            'aggregate_metrics': aggregate_metrics
-        }
-
+            return {
+                'detailed_results': results,
+                'aggregate_metrics': aggregate_metrics
+            }
+    
     def save_evaluation_results(self, results: Dict[str, Any], output_file: str):
         """Save evaluation results to JSON file"""
         try:

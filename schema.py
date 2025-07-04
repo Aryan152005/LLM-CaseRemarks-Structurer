@@ -60,7 +60,7 @@ FIELD_VALUE_SCHEMA = {
         ]
     },
     "state_of_victim": [
-        'Distressed', 'Stable', 'Injured', 'Critical', 'Unconscious', 'Deceased', 'Drunken', 'Not specified'
+        'Distressed', 'Stable', 'Injured', 'Critical', 'Unconscious', 'Deceased', 'Drunken', 'not specified'
     ],
     "victim_gender": [
         'male', 'female', 'not specified'
@@ -118,7 +118,7 @@ class ProcessedOutput(BaseModel):
     specified_matter: Optional[str] = None
     date_reference: Optional[str] = None
     frequency: Optional[str] = None
-    repeat_incident: Optional[Literal["yes", "no", "not specified"]] = "not specified"
+    repeat_incident: Optional[Literal["yes", "no", "not_specified", "not applicable", "not specified"]] = "not specified"
     identification: Optional[str] = None
     injury_type: Optional[str] = None
     victim_age: Optional[str] = None
@@ -131,8 +131,8 @@ class ProcessedOutput(BaseModel):
     used_weapons: Optional[str] = None
     offender_relation: Optional[str] = None
     mode_of_threat: Optional[str] = None
-    need_ambulance: Optional[Literal["yes", "no", "not specified"]] = "not specified"
-    children_involved: Optional[Literal["yes", "no", "not specified"]] = "not specified"
+    need_ambulance: Optional[Literal["yes", "no", "not_specified", "not applicable", "not specified"]] = "not specified"
+    children_involved: Optional[Literal["yes", "no", "not_specified", "not applicable", "not specified"]] = "not specified"
 
     # NEW FIELD: This will store the specific detail when event_sub_type is "OTHERS"
     generated_event_sub_type_detail: Optional[str] = None
@@ -200,7 +200,7 @@ class GroundTruthOutput(BaseModel):
     # Required fields based on the structure of your ground truth data
     event_type: str
     event_sub_type: str
-    state_of_victim: str = Field("Not specified", description="State of the victim")
+    state_of_victim: str = Field("not specified", description="State of the victim")
     victim_gender: str = Field("not specified", description="Gender of the victim")
     
     # Optional text fields (matching ProcessedOutput's optional fields)
