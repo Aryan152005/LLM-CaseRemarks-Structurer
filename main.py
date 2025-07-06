@@ -9,14 +9,15 @@ from schema import ProcessedOutput
 from text_processor import TextProcessor
 from evaluator import Evaluator
 from visualizer import Visualizer
+from field_performance_visualizer import FieldPerformanceVisualizer
 
 # =================== CONFIGURABLE PATHS ===================
-DATA_FOLDER = "test_data/hindi/hindi_42_txt"
-GROUND_TRUTH_PATH = "test_data/hindi/cleaned_new_40_hindi_human.json"
-OUTPUT_BASE_PATH = "test_data/hindi/output_mistral_42_NEW/predictions"
-CSV_OUTPUT_PATH = "test_data/hindi/output_mistral_42_NEW/predictions.csv"
-EVAL_RESULTS_BASE = "test_data/hindi/output_mistral_42_NEW/evaluation_results"
-VISUALIZATION_DIR = "test_data/hindi/output_mistral_42_NEW/visualizations"
+DATA_FOLDER = "test_data/english/eng_test_text_files_for_evaluation"
+GROUND_TRUTH_PATH = "test_data/english/cleaned_new_40_eng.json"
+OUTPUT_BASE_PATH = "results_english/gemini_results/predictions"
+CSV_OUTPUT_PATH = "results_english/gemini_results/predictions.csv"
+EVAL_RESULTS_BASE = "results_english/gemini_results/evaluation_results"
+VISUALIZATION_DIR = "results_english/gemini_results/visualizations"
 LOG_FILE = "file.log"
 
 BATCH_SIZE = 10  # Save after every 10 files
@@ -68,7 +69,6 @@ def save_csv(predictions: List[ProcessedOutput], path: str):
         df = pd.DataFrame([p.model_dump() for p in predictions])
         os.makedirs(os.path.dirname(path), exist_ok=True)
         df.to_csv(path, index=False)
-        logger.info(f"Predictions also saved to CSV at {path}")
     except Exception as e:
         logger.error(f"Error saving CSV: {str(e)}")
 
@@ -78,6 +78,8 @@ def main():
 
     evaluator = Evaluator(ground_truth_file=GROUND_TRUTH_PATH)
     visualizer = Visualizer()
+    # NEW: Initialize the FieldPerformanceVisualizer
+    field_performance_visualizer = FieldPerformanceVisualizer(output_dir=os.path.join(VISUALIZATION_DIR, "field_performance_matrix"))
     
     predictions: List[ProcessedOutput] = []
     batch: List[ProcessedOutput] = []
@@ -130,6 +132,9 @@ def main():
 
     # Save visualizations
     visualizer.create_visualizations(evaluation_results, VISUALIZATION_DIR)
+
+    # NEW: Generate the field performance matrix plot
+    field_performance_visualizer.generate_field_performance_matrix(evaluation_results, output_filename="field_performance_matrix_heatmap.png")
 
 if __name__ == "__main__":
     main()

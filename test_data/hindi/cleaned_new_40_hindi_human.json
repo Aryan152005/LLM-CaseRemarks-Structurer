@@ -1206,7 +1206,7 @@
     "file_name": "1_201002_211008_1747629531.42301017_20250519_100853.txt",
     "event_info_text": "जी नैनीताल अच्छा मैडम ये देखना ईवेंट ईद कहा गया है पुलिस संपर्क हुआ नही उसको अब तक ये सूचना ना अच्छा आपकी मल्लिताल की सारी म्त खराब है खराब ही बता रहा है सिर एक सही है वो ऑफ्लीन ही जा रही ऑनलाइन ही नहीं हो रही रेड आ रही क्या दिक्कत चल रही है म्त में कम से कम एक तो सही रहेगा ऑफिस में एक है उनके पास मैंने दो तीन बार कैल कर दिया है कह रहा है की ये ऑनलाइन नहीं आ रही मतलब रेड शो हो रहा है ग्रीन नहीं हो रहा है मल्लीताल की कितनी सूचना रहती है आपके पास मल्लीताल की सिर कमी आती है चार से पांच कभी कभी ज्यादा हो भी जाती है ना मोंठ चार मोंठ मोंठली विसे कितनी रहती होंगी मोंठली विसे एक मिनट सिर मतलब एवेराज मल्लिताल की लगभग मन मोंठ की कितनी होती होंगी ईडिया ऐसी बता दू नहीं आ रही इतनी एक्टुअली सुनो मैं इसलिए पूछा हु न देखो अगर म्त ठीक है और ऑनलाइन नहीं हो रही है ना म्ब्t में ज्यादा काम होने के कारण नेट खत्म हो जाता है हा एक सो सोलह सूचना है पिछले महीने तो एक बार एक काम करो आपको ना विफी से बोलना जोड़ने को विफी से जोड़ के देख लें एक बार ग्रीन हो जाती है तो हा सिर मैं बताती हूँ हाँ अगर विफी से जुड़ जाती है तो ठीक है और ये इसके लिए बता रही हूँ की संपर्क का हाँ और इसमें मैंने न जो कैलर बताया की उसका जो नंबर कैल कर रखा है बारह चौहत्तर इसमें शायद फोन लग नहीं रहा अगर ये भी रेप्ली कर सकते है थाने वाले नंबर जियो का है ये लिखा है यहाँ पे कमेंट में आपने लिखा है हाँ एक्शन टेकन जून कमेंट में आप ये उनको बता देंगे इससे बात कर लेंगे सोलह हजार रुपये देने है मैंने बोला था उनको दिए नही हमने आजम देख लेना ठीक है मैडम",
     "event_type": "OTHERS",
-    "event_sub_type": "TECHNICAL ISSUE",
+    "event_sub_type": "OTHERS",
     "state_of_victim": "not specified",
     "victim_gender": "not specified",
     "specified_matter": "The issue is with the MT (Mobile Terminal) device in Mallital, Nainital. All MT devices are malfunctioning except one, which is showing as offline (red, not green), preventing online communication. This is hindering police contact for event notifications.",
@@ -1226,7 +1226,7 @@
     "mode_of_threat": "not_specified",
     "need_ambulance": "not_specified",
     "children_involved": "not specified",
-    "generated_event_sub_type_detail": "not specified"
+    "generated_event_sub_type_detail": "TECHNICAL ISSUE"
   },
   {
     "file_name": "1_101006_08126225501_1747631823.42331537_20250519_104713.txt",
@@ -1252,6 +1252,6 @@
     "mode_of_threat": "not_specified",
     "need_ambulance": "not_specified",
     "children_involved": "not specified",
-    "generated_event_sub_type_detail": "not specified"
+    "generated_event_sub_type_detail": "WORKER VERIFICATION"
   }
 ]

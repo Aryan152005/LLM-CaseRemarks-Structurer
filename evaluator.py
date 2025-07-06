@@ -6,25 +6,21 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
-from nltk.tokenize import word_tokenize # <-- Keep this line (added in previous step)
+from nltk.tokenize import word_tokenize
 from rouge_score import rouge_scorer
 from loguru import logger
-# Import both schemas
 from schema import ProcessedOutput, GroundTruthOutput
 import json
 import pandas as pd
 from sklearn.metrics import jaccard_score
-# from rouge import Rouge # <-- REMOVE OR COMMENT OUT THIS LINE
 import requests
 import re
-import os # For path manipulation
+import os
 import sys
-# Import for plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 sys.setrecursionlimit(5000)
-
 
 COMPLETENESS_CHECK_FIELDS = [
     "event_type", "event_sub_type", "state_of_victim", "victim_gender",
@@ -34,6 +30,16 @@ COMPLETENESS_CHECK_FIELDS = [
     "date_of_birth", "used_weapons", "offender_relation", "mode_of_threat",
     "need_ambulance", "children_involved", "generated_event_sub_type_detail"
 ]
+
+# Define the fields that should be treated as categorical (strict match)
+CATEGORICAL_YES_NO_FIELDS = [
+    "need_ambulance",
+    "children_involved",
+    "repeat_incident"
+]
+
+# Define the threshold for LLM binary similarity
+LLM_BINARY_SIMILARITY_THRESHOLD = 0.7
 
 class LLMJudge:
     def __init__(self, ollama_base_url: str = "http://localhost:11434"):
@@ -86,8 +92,6 @@ Your response must strictly adhere to the following output format. Do not includ
 Output Format:
 Score: <number from 0.0 to 1.0, typically 2 decimal places>
 Explanation: <brief explanation of the similarity or lack thereof>
-
-If you cannot perform the comparison due to sensitive content, policy violations, or if the texts are too vague/unrelated to provide a meaningful semantic score, output 'Score: 0.0' and explain why (e.g., "LLM refused: Sensitive content").
 
 Example 1:
 TEXT1: "The cat sat on the mat."
@@ -160,7 +164,6 @@ class Evaluator:
     def __init__(self, ground_truth_file: str):
         self.ground_truth = self._load_ground_truth(ground_truth_file)
         self.llm_judge = LLMJudge()
-        # self.rouge = Rouge()
         self.scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
         self.vectorizer = TfidfVectorizer()
         self.smoothing_function = SmoothingFunction()
@@ -182,16 +185,13 @@ class Evaluator:
                     cleaned_item = {}
                     for k, v in item.items():
                         if isinstance(v, str) and v.strip().lower() in ["null", "none", ""]:
-                            cleaned_item[k] = "Not specified" if k in ["state_of_victim", "victim_gender"] else None
+                            cleaned_item[k] = "not specified"
                         elif v is None:
-                            cleaned_item[k] = "Not specified" if k in ["state_of_victim", "victim_gender"] else None
+                            cleaned_item[k] = "not specified"
                         else:
                             cleaned_item[k] = v
 
                     gt_data_for_model = {k: cleaned_item[k] for k in GroundTruthOutput.model_fields.keys() if k in cleaned_item}
-                    # IMPORTANT: Add 'generated_event_sub_type_detail' to GroundTruthOutput if it's expected
-                    # For now, if not present in GT, it will default to None/'' in comparison.
-                    # When you generate GT for this, ensure it's included.
                     
                     gt_output = GroundTruthOutput(**gt_data_for_model)
                     ground_truth_map[base_file_name] = gt_output
@@ -235,7 +235,8 @@ class Evaluator:
                 'rouge_1': 1.0,
                 'rouge_2': 1.0,
                 'rouge_l': 1.0,
-                'llm_similarity': 1.0
+                'llm_similarity': 1.0,
+                'llm_binary_similarity': 1.0
             }
         # Handle cases where one text is empty and the other is not
         elif not text1_stripped or not text2_stripped:
@@ -245,13 +246,14 @@ class Evaluator:
                 'rouge_1': 0.0,
                 'rouge_2': 0.0,
                 'rouge_l': 0.0,
-                'llm_similarity': 0.0
+                'llm_similarity': 0.0,
+                'llm_binary_similarity': 0.0
             }
 
         # --- Jaccard Similarity ---
         # Convert to lowercase and tokenize using NLTK for better results
-        tokens1_list = word_tokenize(text1_stripped.lower()) # Changed from .split()
-        tokens2_list = word_tokenize(text2_stripped.lower()) # Changed from .split()
+        tokens1_list = word_tokenize(text1_stripped.lower())
+        tokens2_list = word_tokenize(text2_stripped.lower())
 
         # Convert to set for Jaccard calculation
         tokens1_set = set(tokens1_list)
@@ -262,34 +264,33 @@ class Evaluator:
         jaccard = intersection / union if union > 0 else 0.0
 
         # --- BLEU Score ---
-        # NLTK's sentence_bleu expects a list of reference token lists.
-        # Use the already tokenized lists for BLEU
-        bleu_ref_tokens = tokens1_list # Using word_tokenize output
-        bleu_hyp_tokens = tokens2_list # Using word_tokenize output
+        bleu_ref_tokens = tokens1_list
+        bleu_hyp_tokens = tokens2_list
 
-        # Check if either token list is empty before calculating BLEU
         if bleu_ref_tokens and bleu_hyp_tokens:
             bleu = sentence_bleu([bleu_ref_tokens], bleu_hyp_tokens, smoothing_function=self.smoothing_function.method1)
         else:
-            bleu = 0.0 # Cannot calculate BLEU if one or both token lists are empty
+            bleu = 0.0
 
         # --- ROUGE Scores (using rouge-score library) ---
         rouge_scores_output = {'rouge-1': {'f': 0.0}, 'rouge-2': {'f': 0.0}, 'rouge-l': {'f': 0.0}}
         try:
-            # Use self.scorer (from rouge_scorer.RougeScorer)
             scores = self.scorer.score(text1_stripped, text2_stripped)
 
-            # Map the rouge-score output format to your desired format
             rouge_scores_output['rouge-1']['f'] = scores['rouge1'].fmeasure
             rouge_scores_output['rouge-2']['f'] = scores['rouge2'].fmeasure
-            rouge_scores_output['rouge-l']['f'] = scores['rougeL'].fmeasure # 'rougeL' is the key for rouge-score
+            rouge_scores_output['rouge-l']['f'] = scores['rougeL'].fmeasure
 
-        except Exception as e: # Catch broader exceptions for robustness
+        except Exception as e:
             logger.warning(f"ROUGE calculation error with rouge-score: {e} for '{text1_stripped[:50]}' vs '{text2_stripped[:50]}'")
 
         # --- LLM Similarity ---
         llm_score, _ = self.llm_judge.is_similar(text1_stripped, text2_stripped)
-        llm_score = llm_score if llm_score is not None else 0.0 # Ensure it's a float
+        llm_score = llm_score if llm_score is not None else 0.0
+
+        # --- NEW: LLM Binary Similarity ---
+        llm_binary_similarity = 1.0 if llm_score >= LLM_BINARY_SIMILARITY_THRESHOLD else 0.0
+
 
         return {
             'jaccard': jaccard,
@@ -297,7 +298,8 @@ class Evaluator:
             'rouge_1': rouge_scores_output['rouge-1']['f'],
             'rouge_2': rouge_scores_output['rouge-2']['f'],
             'rouge_l': rouge_scores_output['rouge-l']['f'],
-            'llm_similarity': llm_score
+            'llm_similarity': llm_score,
+            'llm_binary_similarity': llm_binary_similarity
         }
     
     def _is_field_complete(self, value: Any) -> bool:
@@ -322,14 +324,11 @@ class Evaluator:
             gt_value = getattr(ground_truth, field, None)
             processed_value = getattr(processed_output, field, None)
 
-            # Consider a field 'populated' if its value is not None, not an empty string/list, and not "not specified"
             is_gt_populated = gt_value is not None and \
-                              (str(gt_value).strip().lower() != 'not specified' if isinstance(gt_value, str) else True) and \
-                              (gt_value != "" if isinstance(gt_value, str) else True)
+                              (str(gt_value).strip().lower() not in ['not specified', ''] if isinstance(gt_value, str) else True)
                               
             is_processed_populated = processed_value is not None and \
-                                     (str(processed_value).strip().lower() != 'not specified' if isinstance(processed_value, str) else True) and \
-                                     (processed_value != "" if isinstance(processed_value, str) else True)
+                                     (str(processed_value).strip().lower() not in ['not specified', ''] if isinstance(processed_value, str) else True)
 
             if is_gt_populated:
                 populated_fields_in_gt += 1
@@ -337,9 +336,8 @@ class Evaluator:
                     populated_and_matched_in_processed += 1
         
         if populated_fields_in_gt == 0:
-            return 100.0 # If ground truth has no populated fields to check, consider it 100% complete
+            return 100.0
         
-        # Score based on how many ground truth populated fields were also populated in processed output
         completeness = (populated_and_matched_in_processed / populated_fields_in_gt) * 100
         return completeness
 
@@ -389,7 +387,6 @@ class Evaluator:
             'Event Sub-Type Fuzzy Accuracy (LLM)': 'sub_type_fuzzy_match',
         }
 
-        # Calculate mean for each metric across all samples
         plot_data = {
             'Metric': [],
             'Mean Score': []
@@ -413,12 +410,11 @@ class Evaluator:
         sns.barplot(x='Metric', y='Mean Score', data=plot_df, palette='viridis')
         plt.title('Mean Accuracy for Event Type and Sub-Type', fontsize=16)
         plt.ylabel('Mean Score (0-1.0)', fontsize=12)
-        plt.xlabel('') # No label needed for x-axis as labels are descriptive
-        plt.ylim(0, 1) # Scores are between 0 and 1
-        plt.xticks(rotation=15, ha='right', fontsize=10) # Rotate labels for better readability
+        plt.xlabel('')
+        plt.ylim(0, 1)
+        plt.xticks(rotation=15, ha='right', fontsize=10)
         plt.grid(axis='y', linestyle='--', alpha=0.7)
 
-        # Add value labels on top of bars
         for index, row in plot_df.iterrows():
             plt.text(index, row['Mean Score'] + 0.02, f"{row['Mean Score']:.2f}", color='black', ha="center", fontsize=10)
 
@@ -434,20 +430,20 @@ class Evaluator:
         results = []
         
         # Define all comparable text-based fields present in both ProcessedOutput and GroundTruthOutput
-        # IMPORTANT: Ensure this list accurately reflects fields in BOTH schemas that you want to compare.
-        # Added 'generated_event_sub_type_detail' here.
+        # These fields will be evaluated using text similarity metrics (Jaccard, BLEU, ROUGE, LLM similarity)
         comparable_text_fields = [
-            "specified_matter", "date_reference", "frequency", "repeat_incident",
+            "specified_matter", "date_reference", "frequency",
             "identification", "injury_type", "victim_age", "victim_relation",
             "incident_location", "area", "suspect_description", "object_involved",
-            "used_weapons", "offender_relation", "mode_of_threat", "need_ambulance",
-            "children_involved", "date_of_birth", "generated_event_sub_type_detail" 
+            "used_weapons", "offender_relation", "mode_of_threat",
+            "date_of_birth", "generated_event_sub_type_detail" 
         ]
 
         # Define categorical fields that will be evaluated for strict accuracy
-        # event_type and event_sub_type are INCLUDED here now to ensure their strict match is part of the dataframe and aggregate
+        # This now includes the new yes/no fields
         categorical_fields_for_accuracy = [
-            'event_type', 'event_sub_type', 'state_of_victim', 'victim_gender'
+            'event_type', 'event_sub_type', 'state_of_victim', 'victim_gender',
+            'need_ambulance', 'children_involved', 'repeat_incident'
         ]
 
         for pred in predictions:
@@ -457,11 +453,9 @@ class Evaluator:
                 
             if file_name_key not in self.ground_truth:
                 logger.warning(f"No ground truth found for {file_name_key}. Skipping evaluation for this prediction.")
-                # Initialize result dict for the current prediction if we are skipping for lack of ground truth
                 current_result = {'file_name': file_name_key}
                 current_result['processing_metrics'] = {'processing_time': pred.processing_time}
-                current_result['completeness_score'] = 0.0 # Assign 0 completeness if no GT to compare against
-                # Set all other metrics to 0 or appropriate default if no GT
+                current_result['completeness_score'] = 0.0
                 current_result.update({
                     'type_strict_match': 0.0, 'sub_type_strict_match': 0.0,
                     'type_fuzzy_match': 0.0, 'sub_type_fuzzy_match': 0.0
@@ -475,51 +469,72 @@ class Evaluator:
                     current_result[f"{field}_rouge_2"] = 0.0
                     current_result[f"{field}_rouge_l"] = 0.0
                     current_result[f"{field}_llm_similarity"] = 0.0
-                results.append(current_result) # Add this skipped result to maintain structure
-                continue # Now continue with the next prediction
+                    current_result[f"{field}_llm_binary_similarity"] = 0.0
+                
+                # Initialize hallucination metrics for skipped files
+                current_result['hallucinated_fields_count'] = 0
+                current_result['hallucinated_fields_list'] = []
+                # Also initialize missing_from_llm_count etc. for consistency in detailed results
+                current_result['missing_from_llm_count'] = 0
+                current_result['missing_from_llm_list'] = []
+                current_result['correct_fields_count'] = 0
+                current_result['incorrect_fields_count'] = 0
+
+                results.append(current_result)
+                continue
 
             true = self.ground_truth[file_name_key]
             
-            # Initialize result dict for the current prediction
             current_result = {'file_name': file_name_key}
             current_result['processing_metrics'] = {'processing_time': pred.processing_time}
 
-            # Evaluate Event Type and Sub-type (categorical + fuzzy from LLM)
-            # These values (type_strict_match, sub_type_strict_match, type_fuzzy_match, sub_type_fuzzy_match)
-            # are directly added to current_result.
             event_metrics = self._calculate_event_similarity(
                 pred.event_type, pred.event_sub_type,
                 true.event_type, true.event_sub_type
             )
             current_result.update(event_metrics)
             
-            # Calculate and add completeness score
             completeness_score = self._calculate_completeness_score(pred, true)
             current_result['completeness_score'] = completeness_score
 
-            # Add strict categorical matches for ALL fields in categorical_fields_for_accuracy,
-            # INCLUDING event_type and event_sub_type.
-            # The values from event_metrics for type_strict_match and sub_type_strict_match
-            # will be used if they exist, or re-calculated here.
-            # It's generally better to use the specific calculation if available, as in event_metrics.
-            # So, we ensure that if 'event_type' or 'event_sub_type' are in categorical_fields_for_accuracy,
-            # their 'strict_match' metric is correctly taken from event_metrics.
+            # Initialize counts for the current record
+            hallucinated_fields_count = 0
+            hallucinated_fields_list = []
+            missing_from_llm_count = 0
+            missing_from_llm_list = []
+            correct_fields_count = 0
+            incorrect_fields_count = 0
+
+            # Calculate strict categorical matches for all fields in categorical_fields_for_accuracy
             for field in categorical_fields_for_accuracy:
-                if field == 'event_type':
-                    current_result[f'{field}_strict_match'] = event_metrics.get('type_strict_match', 0.0)
-                elif field == 'event_sub_type':
-                    current_result[f'{field}_strict_match'] = event_metrics.get('sub_type_strict_match', 0.0)
-                else:
-                    pred_value = getattr(pred, field, None)
-                    true_value = getattr(true, field, None)
-                    
-                    pred_val_comp = pred_value.strip().upper() if isinstance(pred_value, str) else ''
-                    true_val_comp = true_value.strip().upper() if isinstance(true_value, str) else ''
+                pred_value = getattr(pred, field, None)
+                true_value = getattr(true, field, None)
+                
+                pred_val_norm = str(pred_value).strip().lower() if pred_value is not None else "not specified"
+                true_val_norm = str(true_value).strip().lower() if true_value is not None else "not specified"
 
-                    current_result[f'{field}_strict_match'] = 1.0 if (pred_val_comp and true_val_comp and pred_val_comp == true_val_comp) else 0.0
+                is_pred_populated = pred_val_norm not in ["not specified", ""]
+                is_true_populated = true_val_norm not in ["not specified", ""]
 
-            # Text similarity metrics for all relevant text fields
-            # Including 'generated_event_sub_type_detail' here
+                is_match = (pred_val_norm == true_val_norm)
+
+                current_result[f'{field}_strict_match'] = 1.0 if is_match else 0.0
+
+                # Hallucination and Missing Logic for Categorical Fields
+                if is_pred_populated and not is_true_populated:
+                    hallucinated_fields_count += 1
+                    hallucinated_fields_list.append(field)
+                elif not is_pred_populated and is_true_populated:
+                    missing_from_llm_count += 1
+                    missing_from_llm_list.append(field)
+                elif is_pred_populated and is_true_populated:
+                    if is_match:
+                        correct_fields_count += 1
+                    else:
+                        incorrect_fields_count += 1
+
+
+            # Text similarity metrics for all relevant text fields (excluding the now categorical fields)
             for field in comparable_text_fields:
                 pred_text = getattr(pred, field, None)
                 true_text = getattr(true, field, None)
@@ -527,41 +542,61 @@ class Evaluator:
                 pred_text_clean = pred_text if pred_text is not None and pred_text.lower() != 'not specified' else ''
                 true_text_clean = true_text if true_text is not None and true_text.lower() != 'not specified' else ''
 
+                is_pred_populated = pred_text_clean != ''
+                is_true_populated = true_text_clean != ''
+
                 field_metrics = self._calculate_text_similarity(pred_text_clean, true_text_clean)
                 for metric, value in field_metrics.items():
                     current_result[f"{field}_{metric}"] = value
                 
+                # Hallucination and Missing Logic for Text Fields
+                if is_pred_populated and not is_true_populated:
+                    hallucinated_fields_count += 1
+                    hallucinated_fields_list.append(field)
+                elif not is_pred_populated and is_true_populated:
+                    missing_from_llm_count += 1
+                    missing_from_llm_list.append(field)
+                elif is_pred_populated and is_true_populated:
+                    # For text fields, use llm_binary_similarity for correctness check
+                    if field_metrics.get('llm_binary_similarity', 0.0) == 1.0:
+                        correct_fields_count += 1
+                    else:
+                        incorrect_fields_count += 1
+
+            # Add hallucination and other counts to the current result
+            current_result['hallucinated_fields_count'] = hallucinated_fields_count
+            current_result['hallucinated_fields_list'] = hallucinated_fields_list
+            current_result['missing_from_llm_count'] = missing_from_llm_count
+            current_result['missing_from_llm_list'] = missing_from_llm_list
+            current_result['correct_fields_count'] = correct_fields_count
+            current_result['incorrect_fields_count'] = incorrect_fields_count
+
             results.append(current_result)
             
         if not results:
             logger.warning("No evaluation results to aggregate. Check if ground truth files match predictions.")
             return {'detailed_results': [], 'aggregate_metrics': {}}
-        else: # This 'else' block ensures df is always defined before use
+        else:
             df = pd.DataFrame(results)
             
-            # Initialize aggregate_metrics
             aggregate_metrics = {}
 
-            # Aggregate event type and sub-type (now correctly picked from event_metrics via current_result)
-            # These columns will exist in the DataFrame because of current_result.update(event_metrics)
-            aggregate_metrics['event_type_strict_accuracy'] = df['type_strict_match'].mean() if 'type_strict_match' in df.columns else 0.0
-            aggregate_metrics['event_type_fuzzy_accuracy'] = df['type_fuzzy_match'].mean() if 'type_fuzzy_match' in df.columns else 0.0
-            aggregate_metrics['event_sub_type_strict_accuracy'] = df['sub_type_strict_match'].mean() if 'sub_type_strict_match' in df.columns else 0.0
-            aggregate_metrics['event_sub_type_fuzzy_accuracy'] = df['sub_type_fuzzy_match'].mean() if 'sub_type_fuzzy_match' in df.columns else 0.0
-
-            # Aggregate other categorical fields (e.g., state_of_victim, victim_gender)
-            # This loop now correctly handles all fields in categorical_fields_for_accuracy,
-            # including event_type and event_sub_type whose strict matches were ensured above.
+            # Aggregate all strict categorical matches, including event_type, event_sub_type, and the new yes/no fields
             for field in categorical_fields_for_accuracy:
                 col_name = f"{field}_strict_match"
                 if col_name in df.columns:
                     aggregate_metrics[f"{field}_strict_accuracy"] = df[col_name].mean()
                 else:
                     aggregate_metrics[f"{field}_strict_accuracy"] = 0.0
+            
+            # Aggregate event type and sub-type fuzzy matches (these are still relevant)
+            aggregate_metrics['event_type_fuzzy_accuracy'] = df['type_fuzzy_match'].mean() if 'type_fuzzy_match' in df.columns else 0.0
+            aggregate_metrics['event_sub_type_fuzzy_accuracy'] = df['sub_type_fuzzy_match'].mean() if 'sub_type_fuzzy_match' in df.columns else 0.0
 
-            # Aggregate text similarity metrics
+
+            # Aggregate text similarity metrics for each comparable field (excluding the now categorical fields)
             for field in comparable_text_fields:
-                for metric in ['jaccard', 'bleu', 'rouge_1', 'rouge_2', 'rouge_l', 'llm_similarity']:
+                for metric in ['jaccard', 'bleu', 'rouge_1', 'rouge_2', 'rouge_l', 'llm_similarity', 'llm_binary_similarity']:
                     col = f"{field}_{metric}"
                     if col in df.columns:
                         aggregate_metrics[f"{field}_{metric}_mean"] = df[col].mean()
@@ -578,8 +613,50 @@ class Evaluator:
                     'std_completeness_score': 0.0
                 }
 
-            # Call the plotting function here
-            self.plot_event_metrics(df, output_dir) # Pass the DataFrame and output directory
+            # --- NEW: Aggregate Hallucination Metrics ---
+            total_records = len(df)
+            total_possible_fields_to_check = len(COMPLETENESS_CHECK_FIELDS) * total_records
+
+            # Overall hallucination
+            total_hallucinated_across_all_records = df['hallucinated_fields_count'].sum()
+            aggregate_metrics['hallucination_metrics'] = {
+                'total_hallucinated_fields': total_hallucinated_across_all_records,
+                'mean_hallucinated_fields_per_record': df['hallucinated_fields_count'].mean(),
+                'overall_hallucination_percentage': (total_hallucinated_across_all_records / total_possible_fields_to_check) * 100 if total_possible_fields_to_check > 0 else 0.0
+            }
+
+            # Field-wise hallucination percentage
+            field_wise_hallucination_counts = {field: 0 for field in COMPLETENESS_CHECK_FIELDS}
+            for record_hallucinated_list in df['hallucinated_fields_list']:
+                for field_name in record_hallucinated_list:
+                    if field_name in field_wise_hallucination_counts:
+                        field_wise_hallucination_counts[field_name] += 1
+            
+            aggregate_metrics['hallucination_metrics']['field_wise_hallucination_percentage'] = {}
+            for field, count in field_wise_hallucination_counts.items():
+                aggregate_metrics['hallucination_metrics']['field_wise_hallucination_percentage'][field] = (count / total_records) * 100 if total_records > 0 else 0.0
+
+            # --- NEW: Aggregate Missing, Correct, Incorrect Counts ---
+            aggregate_metrics['missing_from_llm_metrics'] = {
+                'total_missing_from_llm_fields': df['missing_from_llm_count'].sum(),
+                'mean_missing_from_llm_fields_per_record': df['missing_from_llm_count'].mean()
+            }
+            aggregate_metrics['correct_fields_metrics'] = {
+                'total_correct_fields': df['correct_fields_count'].sum(),
+                'mean_correct_fields_per_record': df['correct_fields_count'].mean()
+            }
+            aggregate_metrics['incorrect_fields_metrics'] = {
+                'total_incorrect_fields': df['incorrect_fields_count'].sum(),
+                'mean_incorrect_fields_per_record': df['incorrect_fields_count'].mean()
+            }
+
+
+            # The plotting function will now use the DataFrame created from `results`
+            # and the aggregate_metrics dictionary.
+            # The `evaluate_predictions` function returns a dictionary with 'detailed_results' and 'aggregate_metrics'.
+            # The `create_visualizations` in visualizer.py expects this structure.
+            # So, the plot_event_metrics call here is actually not needed as create_visualizations will handle it.
+            # self.plot_event_metrics(df, output_dir) 
 
             return {
                 'detailed_results': results,
@@ -596,8 +673,6 @@ class Evaluator:
             logger.error(f"Error saving evaluation results: {str(e)}")
 
     def _calculate_rouge_and_bleu(self, text1: str, text2: str) -> Dict[str, float]:
-        # This method is not called anywhere in the current Evaluator logic.
-        # It seems redundant with _calculate_text_similarity. Keeping it if it has future use.
         scores = {}
         
         ref_tokens = text1.lower().split() if text1 else []
@@ -618,8 +693,6 @@ class Evaluator:
         return scores
 
     def _calculate_bleu_score(self, pred: str, true: str) -> float:
-        # This method is not called anywhere in the current Evaluator logic.
-        # It seems redundant with _calculate_text_similarity. Keeping it if it has future use.
         """Calculate BLEU score"""
         if not pred or not true:
             return 0.0
@@ -635,8 +708,6 @@ class Evaluator:
             return 0.0
 
     def _calculate_jaccard_similarity(self, pred: List[str], true: List[str]) -> float:
-        # This method is not called anywhere in the current Evaluator logic.
-        # It seems redundant with _calculate_text_similarity. Keeping it if it has future use.
         """Calculate Jaccard similarity between two sets"""
         try:
             pred_set = set(pred)
@@ -658,46 +729,70 @@ class Evaluator:
             'processing_metrics': {}    
         }
         
-        # Categorical metrics
-        # state_of_victim and victim_gender strict matches
-        categorical_fields_strict = ['state_of_victim', 'victim_gender']    
-        for field in categorical_fields_strict:
+        # Initialize counts for the current record
+        hallucinated_fields_count = 0
+        hallucinated_fields_list = []
+        missing_from_llm_count = 0
+        missing_from_llm_list = []
+        correct_fields_count = 0
+        incorrect_fields_count = 0
+
+        # Categorical fields (including event_type, sub_type, state_of_victim, victim_gender, and yes/no fields)
+        all_categorical_fields = [
+            'event_type', 'event_sub_type', 'state_of_victim', 'victim_gender'
+        ] + CATEGORICAL_YES_NO_FIELDS
+
+        for field in all_categorical_fields:
             pred_value = getattr(prediction, field, None)
             true_value = getattr(ground_truth, field, None)
             
-            pred_val_comp = pred_value.upper() if isinstance(pred_value, str) else ''
-            true_val_comp = true_value.upper() if isinstance(true_value, str) else ''
+            pred_val_norm = str(pred_value).strip().lower() if pred_value is not None else "not specified"
+            true_val_norm = str(true_value).strip().lower() if true_value is not None else "not specified"
 
-            if pred_val_comp and true_val_comp:
-                metrics['categorical_metrics'][field] = {
-                    'accuracy': 1.0 if pred_val_comp == true_val_comp else 0.0    
-                }
-            else:
-                    metrics['categorical_metrics'][field] = {'accuracy': 0.0}
+            is_pred_populated = pred_val_norm not in ["not specified", ""]
+            is_true_populated = true_val_norm not in ["not specified", ""]
+
+            is_match = (pred_val_norm == true_val_norm)
+
+            # Store strict accuracy for individual categorical fields
+            metrics['categorical_metrics'][field] = {
+                'accuracy': 1.0 if is_match else 0.0    
+            }
+
+            # Hallucination, Missing, Correct, Incorrect Logic for Categorical Fields
+            if is_pred_populated and not is_true_populated:
+                hallucinated_fields_count += 1
+                hallucinated_fields_list.append(field)
+            elif not is_pred_populated and is_true_populated:
+                missing_from_llm_count += 1
+                missing_from_llm_list.append(field)
+            elif is_pred_populated and is_true_populated:
+                if is_match:
+                    correct_fields_count += 1
+                else:
+                    incorrect_fields_count += 1
+            # If both are not populated, they are considered a match (0,0) and don't count towards these metrics.
+            # This is consistent with how completeness works.
 
         # Event type and sub-type evaluation (combines strict and fuzzy)
         event_metrics = self._calculate_event_similarity(
             prediction.event_type, prediction.event_sub_type,
             ground_truth.event_type, ground_truth.event_sub_type
         )
-        # Add event_type/sub_type directly to categorical_metrics for consistency in single evaluation output
-        metrics['categorical_metrics']['event_type'] = {
-            'strict_accuracy': event_metrics['type_strict_match'],
-            'fuzzy_accuracy': event_metrics['type_fuzzy_match']
-        }
-        metrics['categorical_metrics']['event_sub_type'] = {
-            'strict_accuracy': event_metrics['sub_type_strict_match'],
-            'fuzzy_accuracy': event_metrics['sub_type_fuzzy_match']
-        }
+        # Update metrics for event type/sub-type with fuzzy accuracy
+        metrics['categorical_metrics']['event_type']['strict_accuracy'] = event_metrics['type_strict_match']
+        metrics['categorical_metrics']['event_type']['fuzzy_accuracy'] = event_metrics['type_fuzzy_match']
+        metrics['categorical_metrics']['event_sub_type']['strict_accuracy'] = event_metrics['sub_type_strict_match']
+        metrics['categorical_metrics']['event_sub_type']['fuzzy_accuracy'] = event_metrics['sub_type_fuzzy_match']
+
 
         # Text similarity for relevant fields
-        # IMPORTANT: Added 'generated_event_sub_type_detail' here
         comparable_text_fields = [
-            "specified_matter", "date_reference", "frequency", "repeat_incident",
+            "specified_matter", "date_reference", "frequency",
             "identification", "injury_type", "victim_age", "victim_relation",
             "incident_location", "area", "suspect_description", "object_involved",
-            "used_weapons", "offender_relation", "mode_of_threat", "need_ambulance",
-            "children_involved", "date_of_birth", "generated_event_sub_type_detail"
+            "used_weapons", "offender_relation", "mode_of_threat",
+            "date_of_birth", "generated_event_sub_type_detail"
         ]
 
         for field in comparable_text_fields:
@@ -707,12 +802,45 @@ class Evaluator:
             pred_text_clean = pred_text if pred_text is not None and pred_text.lower() != 'not specified' else ''
             true_text_clean = true_text if true_text is not None and true_text.lower() != 'not specified' else ''
 
-            metrics['text_similarity_metrics'][field] = self._calculate_text_similarity(pred_text_clean, true_text_clean)
+            is_pred_populated = pred_text_clean != ''
+            is_true_populated = true_text_clean != ''
 
+            field_metrics = self._calculate_text_similarity(pred_text_clean, true_text_clean)
+            metrics['text_similarity_metrics'][field] = field_metrics
+            
+            # Hallucination, Missing, Correct, Incorrect Logic for Text Fields
+            if is_pred_populated and not is_true_populated:
+                hallucinated_fields_count += 1
+                hallucinated_fields_list.append(field)
+            elif not is_pred_populated and is_true_populated:
+                missing_from_llm_count += 1
+                missing_from_llm_list.append(field)
+            elif is_pred_populated and is_true_populated:
+                # For text fields, use llm_binary_similarity for correctness check
+                if field_metrics.get('llm_binary_similarity', 0.0) == 1.0:
+                    correct_fields_count += 1
+                else:
+                    incorrect_fields_count += 1
 
         # Processing metrics (only from prediction)
         metrics['processing_metrics'] = {
             'processing_time': prediction.processing_time if hasattr(prediction, 'processing_time') else None
+        }
+        
+        # Add hallucination and other counts to the metrics dictionary for this single record
+        metrics['hallucination_metrics'] = {
+            'hallucinated_fields_count': hallucinated_fields_count,
+            'hallucinated_fields_list': hallucinated_fields_list
+        }
+        metrics['missing_from_llm_metrics'] = {
+            'missing_from_llm_count': missing_from_llm_count,
+            'missing_from_llm_list': missing_from_llm_list
+        }
+        metrics['correct_fields_metrics'] = {
+            'correct_fields_count': correct_fields_count
+        }
+        metrics['incorrect_fields_metrics'] = {
+            'incorrect_fields_count': incorrect_fields_count
         }
         
         return metrics
@@ -734,31 +862,47 @@ class Evaluator:
                 all_metrics.append(metrics)
             except Exception as e:
                 logger.error(f"Error evaluating prediction for {pred.file_name if hasattr(pred, 'file_name') else 'unknown file'}: {str(e)}")
+                # Append an empty dict or a dict with default values to avoid breaking aggregation
+                all_metrics.append({
+                    'categorical_metrics': {},
+                    'text_similarity_metrics': {},
+                    'processing_metrics': {},
+                    'hallucination_metrics': {'hallucinated_fields_count': 0, 'hallucinated_fields_list': []},
+                    'missing_from_llm_metrics': {'missing_from_llm_count': 0, 'missing_from_llm_list': []},
+                    'correct_fields_metrics': {'correct_fields_count': 0},
+                    'incorrect_fields_metrics': {'incorrect_fields_count': 0}
+                })
                 continue
         
         # Aggregate metrics
         aggregated_metrics = {
             'categorical_metrics': {},
             'text_similarity_metrics': {},    
-            'processing_metrics': {}
+            'processing_metrics': {},
+            'hallucination_metrics': {}, # Initialize for aggregation
+            'missing_from_llm_metrics': {},
+            'correct_fields_metrics': {},
+            'incorrect_fields_metrics': {}
         }
         
-        # Aggregate categorical metrics (including event_type and sub_type)
-        # Use the structure from evaluate_single for aggregation clarity
+        # Aggregate categorical metrics (including event_type, sub_type, state_of_victim, victim_gender, and the new yes/no fields)
+        all_categorical_fields = [
+            'event_type', 'event_sub_type', 'state_of_victim', 'victim_gender'
+        ] + CATEGORICAL_YES_NO_FIELDS
+
         categorical_fields_for_aggregation = {
             'event_type': ['strict_accuracy', 'fuzzy_accuracy'],
-            'event_sub_type': ['strict_accuracy', 'fuzzy_accuracy'],
-            'state_of_victim': ['accuracy'],
-            'victim_gender': ['accuracy']
+            'event_sub_type': ['strict_accuracy', 'fuzzy_accuracy']
         }
+        for field in ['state_of_victim', 'victim_gender'] + CATEGORICAL_YES_NO_FIELDS:
+            categorical_fields_for_aggregation[field] = ['accuracy']
+
 
         for field, metric_types in categorical_fields_for_aggregation.items():
             for metric_type in metric_types:
-                # Access deeply nested metrics
                 scores = [m['categorical_metrics'].get(field, {}).get(metric_type, 0.0)
                           for m in all_metrics if field in m['categorical_metrics']]
                 if scores:
-                    # Initialize nested dict if it doesn't exist
                     if field not in aggregated_metrics['categorical_metrics']:
                         aggregated_metrics['categorical_metrics'][field] = {}
                     aggregated_metrics['categorical_metrics'][field][f'mean_{metric_type}'] = np.mean(scores)
@@ -768,18 +912,17 @@ class Evaluator:
                     aggregated_metrics['categorical_metrics'][field][f'mean_{metric_type}'] = 0.0
 
         # Aggregate text similarity metrics for each comparable field
-        # IMPORTANT: Included 'generated_event_sub_type_detail' here
         comparable_text_fields = [
-            "specified_matter", "date_reference", "frequency", "repeat_incident",
+            "specified_matter", "date_reference", "frequency",
             "identification", "injury_type", "victim_age", "victim_relation",
             "incident_location", "area", "suspect_description", "object_involved",
-            "used_weapons", "offender_relation", "mode_of_threat", "need_ambulance",
-            "children_involved", "date_of_birth", "generated_event_sub_type_detail"
+            "used_weapons", "offender_relation", "mode_of_threat",
+            "date_of_birth", "generated_event_sub_type_detail"
         ]
         
         for field in comparable_text_fields:
             aggregated_metrics['text_similarity_metrics'][field] = {}
-            for metric in ['jaccard', 'bleu', 'rouge_1', 'rouge_2', 'rouge_l', 'llm_similarity']:
+            for metric in ['jaccard', 'bleu', 'rouge_1', 'rouge_2', 'rouge_l', 'llm_similarity', 'llm_binary_similarity']:
                 scores = [m['text_similarity_metrics'].get(field, {}).get(metric, 0.0)
                           for m in all_metrics if field in m['text_similarity_metrics']]
                 if scores:
@@ -802,4 +945,68 @@ class Evaluator:
                 'total_processing_time': 0.0
             }
                                         
-        return aggregated_metrics
+        # --- NEW: Aggregate Hallucination Metrics ---
+        # Calculate overall hallucination
+        total_hallucinated_across_all_records = sum(m['hallucination_metrics']['hallucinated_fields_count'] for m in all_metrics)
+        total_records_evaluated = len(all_metrics)
+        total_possible_fields_to_check = len(COMPLETENESS_CHECK_FIELDS) * total_records_evaluated
+
+        aggregated_metrics['hallucination_metrics']['total_hallucinated_fields'] = total_hallucinated_across_all_records
+        aggregated_metrics['hallucination_metrics']['mean_hallucinated_fields_per_record'] = total_hallucinated_across_all_records / total_records_evaluated if total_records_evaluated > 0 else 0.0
+        aggregated_metrics['hallucination_metrics']['overall_hallucination_percentage'] = (total_hallucinated_across_all_records / total_possible_fields_to_check) * 100 if total_possible_fields_to_check > 0 else 0.0
+
+        # Field-wise hallucination percentage
+        field_wise_hallucination_counts = {field: 0 for field in COMPLETENESS_CHECK_FIELDS}
+        for m in all_metrics:
+            for field_name in m['hallucination_metrics']['hallucinated_fields_list']:
+                if field_name in field_wise_hallucination_counts:
+                    field_wise_hallucination_counts[field_name] += 1
+        
+        aggregated_metrics['hallucination_metrics']['field_wise_hallucination_percentage'] = {}
+        for field, count in field_wise_hallucination_counts.items():
+            aggregated_metrics['hallucination_metrics']['field_wise_hallucination_percentage'][field] = (count / total_records_evaluated) * 100 if total_records_evaluated > 0 else 0.0
+
+        # --- NEW: Aggregate Missing, Correct, Incorrect Counts ---
+        total_missing_from_llm = sum(m['missing_from_llm_metrics']['missing_from_llm_count'] for m in all_metrics)
+        total_correct_fields = sum(m['correct_fields_metrics']['correct_fields_count'] for m in all_metrics)
+        total_incorrect_fields = sum(m['incorrect_fields_metrics']['incorrect_fields_count'] for m in all_metrics)
+
+        aggregated_metrics['missing_from_llm_metrics'] = {
+            'total_missing_from_llm_fields': total_missing_from_llm,
+            'mean_missing_from_llm_fields_per_record': total_missing_from_llm / total_records_evaluated if total_records_evaluated > 0 else 0.0,
+            'overall_missing_from_llm_percentage': (total_missing_from_llm / total_possible_fields_to_check) * 100 if total_possible_fields_to_check > 0 else 0.0
+        }
+        aggregated_metrics['correct_fields_metrics'] = {
+            'total_correct_fields': total_correct_fields,
+            'mean_correct_fields_per_record': total_correct_fields / total_records_evaluated if total_records_evaluated > 0 else 0.0,
+            'overall_correct_percentage': (total_correct_fields / total_possible_fields_to_check) * 100 if total_possible_fields_to_check > 0 else 0.0
+        }
+        aggregated_metrics['incorrect_fields_metrics'] = {
+            'total_incorrect_fields': total_incorrect_fields,
+            'mean_incorrect_fields_per_record': total_incorrect_fields / total_records_evaluated if total_records_evaluated > 0 else 0.0,
+            'overall_incorrect_percentage': (total_incorrect_fields / total_possible_fields_to_check) * 100 if total_possible_fields_to_check > 0 else 0.0
+        }
+
+        # Field-wise missing percentage
+        field_wise_missing_counts = {field: 0 for field in COMPLETENESS_CHECK_FIELDS}
+        for m in all_metrics:
+            for field_name in m['missing_from_llm_metrics']['missing_from_llm_list']:
+                if field_name in field_wise_missing_counts:
+                    field_wise_missing_counts[field_name] += 1
+        
+        aggregated_metrics['missing_from_llm_metrics']['field_wise_missing_percentage'] = {}
+        for field, count in field_wise_missing_counts.items():
+            aggregated_metrics['missing_from_llm_metrics']['field_wise_missing_percentage'][field] = (count / total_records_evaluated) * 100 if total_records_evaluated > 0 else 0.0
+
+
+        # The plotting function will now use the DataFrame created from `results`
+        # and the aggregate_metrics dictionary.
+        # The `evaluate_predictions` function returns a dictionary with 'detailed_results' and 'aggregate_metrics'.
+        # The `create_visualizations` in visualizer.py expects this structure.
+        # So, the plot_event_metrics call here is actually not needed as create_visualizations will handle it.
+        # self.plot_event_metrics(df, output_dir) 
+
+        return {
+            'detailed_results': results,
+            'aggregate_metrics': aggregated_metrics
+        }

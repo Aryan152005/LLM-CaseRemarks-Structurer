@@ -62,7 +62,7 @@ FEW_SHOT_EXAMPLES = [
     "specified_matter": "her husband has beaten her and thrown her out, he keeps coming to my house again and again",
     "date_reference": "not specified",
     "frequency": "not specified",
-    "repeat_incident": "yes (implied from \"he keeps coming here\")",
+    "repeat_incident": "yes",
     "identification": "Shazia Parveen",
     "injury_type": "bleeding",
     "victim_age": "not specified",
@@ -74,7 +74,7 @@ FEW_SHOT_EXAMPLES = [
     "used_weapons": "hands (implied from \"there is a lot of blood on her hands too\")",
     "offender_relation": "husband of the victim (implied)",
     "mode_of_threat": "physical violence",
-    "need_ambulance": "yes (implied from \"a lot of blood on her hands too\")",
+    "need_ambulance": "yes",
     "children_involved": "not specified",
     "generated_event_sub_type_detail": "not specified"
     },
@@ -136,7 +136,7 @@ def get_few_shot_examples_str():
 class TextProcessor:
     def __init__(self, ollama_base_url: str = "http://localhost:11434"):
         self.ollama_base_url = ollama_base_url
-        self.model_name = "mistral:7b" # Chang model with preference
+        self.model_name = "llama3.1:8b" # Chang model with preference
         self.allowed_event_types = FIELD_VALUE_SCHEMA["event_type"]
         self.allowed_event_sub_types = ALL_EVENT_SUB_TYPES
         
@@ -148,36 +148,114 @@ class TextProcessor:
             "need_ambulance": {v.lower(): v for v in ["yes", "no", "not specified", "not applicable"]},
             "children_involved": {v.lower(): v for v in ["yes", "no", "not specified", "not applicable"]},
         }
+        # Uncomment below lines to use Gemini 2.0 Flash model
+        self.api_key = "AIzaSyA6MCrKG5JRtVwRv_Kt43KqFiotRmuvPaA" 
+        self.model_name = "gemini-2.0-flash" 
 
-    def _call_llm(self, prompt: str) -> Dict[str, Any]:
-        """Call the Ollama LLM API"""
-        try:
-            newline_char = '\n'
-            logger.info(f"TextProcessor calling LLM with prompt (first 200 chars): {prompt[:200].replace(newline_char, ' ')}...")
+    # def _call_llm(self, prompt: str) -> Dict[str, Any]:
+    #     """Call the Ollama LLM API"""
+    #     try:
+    #         newline_char = '\n'
+    #         logger.info(f"TextProcessor calling LLM with prompt (first 200 chars): {prompt[:200].replace(newline_char, ' ')}...")
             
-            response = requests.post(
-                f"{self.ollama_base_url}/api/generate",
-                json={
-                    "model": self.model_name,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
+    #         response = requests.post(
+    #             f"{self.ollama_base_url}/api/generate",
+    #             json={
+    #                 "model": self.model_name,
+    #                 "prompt": prompt,
+    #                 "stream": False,
+    #                 "options": {
+    #                     "temperature": 0.1, # Keep temperature low for structured extraction
+    #                     "num_ctx": 4096 # Adjust context window if prompt is long
+    #                 }
+    #             }
+    #         )
+    #         response.raise_for_status()
+    #         return response.json()
+    #     except requests.exceptions.ConnectionError as ce:
+    #         logger.error(f"Connection Error to Ollama: {ce}. Is Ollama server running at {self.ollama_base_url}?")
+    #         raise # Re-raise the exception to propagate it
+    #     except requests.exceptions.RequestException as re:
+    #         logger.error(f"Request Error to Ollama: {re}")
+    #         raise
+    #     except Exception as e:
+    #         logger.error(f"Error calling LLM: {str(e)}")
+    #         raise
+
+    # Uncomment below method to use Gemini 2.0 Flash model
+    def _call_llm(self, prompt: str) -> Dict[str, Any]:
+        """
+        Call the Gemini 2.0 Flash LLM API with retry logic for rate limits.
+        If a 429 (Too Many Requests) error is encountered, it will wait and retry.
+        """
+        max_retries = 5  # Maximum number of retries
+        retry_delay_seconds = 60 # Initial delay in seconds (e.g., 1 minute)
+
+        for attempt in range(max_retries):
+            try:
+                newline_char = '\n'
+                logger.info(f"TextProcessor calling LLM with prompt (first 200 chars): {prompt[:200].replace(newline_char, ' ')}... (Attempt {attempt + 1}/{max_retries})")
+                
+                # Gemini API endpoint for text generation
+                api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
+
+                # Construct the payload for Gemini API
+                payload = {
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [{"text": prompt}]
+                        }
+                    ],
+                    "generationConfig": {
                         "temperature": 0.1, # Keep temperature low for structured extraction
-                        "num_ctx": 4096 # Adjust context window if prompt is long
+                        "maxOutputTokens": 2048 
                     }
                 }
-            )
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.ConnectionError as ce:
-            logger.error(f"Connection Error to Ollama: {ce}. Is Ollama server running at {self.ollama_base_url}?")
-            raise # Re-raise the exception to propagate it
-        except requests.exceptions.RequestException as re:
-            logger.error(f"Request Error to Ollama: {re}")
-            raise
-        except Exception as e:
-            logger.error(f"Error calling LLM: {str(e)}")
-            raise
+
+                response = requests.post(
+                    api_url,
+                    headers={'Content-Type': 'application/json'},
+                    json=payload
+                )
+                response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
+                
+                result = response.json()
+
+                # Extract the text from the Gemini API response
+                if result.get("candidates") and result["candidates"][0].get("content") and \
+                   result["candidates"][0]["content"].get("parts") and result["candidates"][0]["content"]["parts"][0].get("text"):
+                    generated_text = result["candidates"][0]["content"]["parts"][0]["text"]
+                    logger.info("Successfully received response from Gemini API.")
+                    return {"response": generated_text} # Return in a similar structure to original
+                else:
+                    logger.warning(f"Unexpected response structure from Gemini API: {result}")
+                    return {"response": "Error: Could not parse LLM response."}
+
+            except requests.exceptions.HTTPError as http_err:
+                if http_err.response.status_code == 429: # Rate limit error
+                    logger.warning(f"Rate limit hit (HTTP 429). Retrying in {retry_delay_seconds} seconds... (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay_seconds)
+                    # You might want to increase the delay for subsequent retries (e.g., exponential backoff)
+                    # retry_delay_seconds *= 2 
+                else:
+                    logger.error(f"HTTP Error calling Gemini API: {http_err}. Status Code: {http_err.response.status_code}. Response: {http_err.response.text}")
+                    raise # Re-raise other HTTP errors immediately
+            except requests.exceptions.ConnectionError as ce:
+                logger.error(f"Connection Error to Gemini API: {ce}. Please check your network connection. (Attempt {attempt + 1}/{max_retries})")
+                # For connection errors, you might also want to retry, but with a different strategy or fewer retries
+                time.sleep(retry_delay_seconds) # Wait before retrying connection issues
+            except requests.exceptions.RequestException as re:
+                logger.error(f"General Request Error to Gemini API: {re}. (Attempt {attempt + 1}/{max_retries})")
+                raise # Re-raise other request exceptions
+            except Exception as e:
+                logger.error(f"An unexpected error occurred while calling LLM: {str(e)}. (Attempt {attempt + 1}/{max_retries})")
+                raise # Re-raise any other unexpected errors
+
+        # If all retries are exhausted without success
+        logger.error(f"Failed to get response from Gemini API after {max_retries} attempts due to persistent rate limiting or other errors.")
+        return {"response": "Error: Failed to get LLM response after multiple retries."}
+
 
     def _create_extraction_prompt(self, text: str) -> str:
         safe_text = text.replace('"""', '\"\"\"')
@@ -307,7 +385,7 @@ YOUR RESPONSE (STRICTLY in field: value format):
             
             llm_field, value = line.split(':', 1)
             llm_field = llm_field.strip()
-            value = value.strip()
+            raw_value_from_llm = value.strip() # Keep the raw value for specific checks
 
             # --- Fuzzy match the LLM's field name to the schema's field name ---
             matched_field = self._fuzzy_match_field_name(llm_field)
@@ -318,15 +396,37 @@ YOUR RESPONSE (STRICTLY in field: value format):
             
             # Use the matched_field for all subsequent logic
             field = matched_field
+            
+            # Initialize value to the raw LLM output, will be refined below
+            processed_value = raw_value_from_llm
 
+            # --- START OF NEW LOGIC FOR YES/NO EXTRACTION ---
+            if field in ["need_ambulance", "children_involved", "repeat_incident"]: # Apply to all relevant yes/no fields
+                lower_raw_value = raw_value_from_llm.lower()
+                yes_match = re.search(r'\byes\b', lower_raw_value)
+                no_match = re.search(r'\bno\b', lower_raw_value)
+
+                if yes_match and not no_match: # Found 'yes' but not 'no'
+                    processed_value = "yes"
+                    logger.info(f"Extracted 'yes' for '{field}' from '{raw_value_from_llm}'.")
+                elif no_match and not yes_match: # Found 'no' but not 'yes'
+                    processed_value = "no"
+                    logger.info(f"Extracted 'no' for '{field}' from '{raw_value_from_llm}'.")
+                elif yes_match and no_match: # Both 'yes' and 'no' found (ambiguous)
+                    processed_value = "not specified"
+                    logger.warning(f"Ambiguous 'yes' and 'no' found for '{field}': '{raw_value_from_llm}'. Defaulting to 'not specified'.")
+                # If neither 'yes' nor 'no' is found, processed_value remains raw_value_from_llm
+                # and will be handled by the general literal field correction below.
+            # --- END OF NEW LOGIC FOR YES/NO EXTRACTION ---
+            
             # Normalize common "None", empty string, or invalid outputs to "not specified"
-            if value.lower() in ["null", "none", "", "not_defined", "n/a"]:
-                value = "not specified" 
+            if processed_value.lower() in ["null", "none", "", "not_defined", "n/a"]:
+                processed_value = "not specified" 
 
             # --- Special Handling for event_sub_type and generated_event_sub_type_detail ---
             # Process these so they are in 'result' before the final correction step
             if field == "event_sub_type":
-                normalized_llm_value = value.upper()
+                normalized_llm_value = processed_value.upper()
                 # Store it as is for now, will be corrected in post-processing if needed
                 result[field] = normalized_llm_value
                 # If LLM explicitly outputted OTHERS with a detail, handle that early
@@ -341,26 +441,27 @@ YOUR RESPONSE (STRICTLY in field: value format):
                 # else: a direct match or fuzzy match will be handled in post-processing
             
             elif field == "generated_event_sub_type_detail":
-                result[field] = value if value.lower() not in ["null", "none", ""] else "not specified"
+                result[field] = processed_value if processed_value.lower() not in ["null", "none", ""] else "not specified"
             
             # --- General Literal Field Correction (case sensitivity & fuzzy matching) ---
             elif field in self.literal_field_corrections:
-                corrected_value = self.literal_field_corrections[field].get(value.lower())
+                # Use processed_value for lookup
+                corrected_value = self.literal_field_corrections[field].get(processed_value.lower())
                 if corrected_value: # If a direct lowercase match found, use its correct casing
                     result[field] = corrected_value
                 else: # If not found, try get_close_matches for more flexibility
                     allowed_values_for_field = list(self.literal_field_corrections[field].keys())
-                    matches = get_close_matches(value.lower(), allowed_values_for_field, n=1, cutoff=0.8) # Adjust cutoff
+                    matches = get_close_matches(processed_value.lower(), allowed_values_for_field, n=1, cutoff=0.8) # Adjust cutoff
                     if matches:
                         result[field] = self.literal_field_corrections[field][matches[0]]
-                        logger.info(f"Corrected '{field}' value '{value.lower()}' to closest match '{result[field]}'.")
+                        logger.info(f"Corrected '{field}' value '{processed_value.lower()}' to closest match '{result[field]}'.")
                     else:
                         # If still no match, and it's a "not specified" type, use the default from mapping
                         result[field] = default_not_specified_mapping.get(field, "not specified") 
-                        logger.warning(f"LLM returned invalid literal for '{field}': '{value}'. Defaulting to '{result[field]}'.")
+                        logger.warning(f"LLM returned invalid literal for '{field}': '{processed_value}'. Defaulting to '{result[field]}'.")
             
             else: # For other fields (freeform text)
-                result[field] = value
+                result[field] = processed_value
 
         # --- NEW POST-PROCESSING STEP FOR event_sub_type AND generated_event_sub_type_detail ---
         # This runs after all fields from LLM output have been initially parsed.
