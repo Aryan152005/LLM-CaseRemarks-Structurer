@@ -49,9 +49,9 @@ class FieldPerformanceVisualizer:
             "Correct": "#28a745",   # Correct (GT and LLM, and correct)
             "Incorrect": "#fd7e14",  # Incorrect (GT and LLM, but wrong)
             "Missing": "#ffc107",  # Missing (GT present, LLM absent)
-            "Hallucination": "#dc3545"      # Hallucination (GT absent, LLM present)
+            "Hallucinated": "#dc3545"      # Hallucination (GT absent, LLM present)
         }
-        self.color_map = lis t(self.colors.values())
+        self.color_map = list(self.colors.values())
         self.color_labels = list(self.colors.keys())
 
     def _get_field_status(self, field_name: str, record_metrics: Dict[str, Any]) -> str:
@@ -64,10 +64,10 @@ class FieldPerformanceVisualizer:
         missing_list = record_metrics.get('missing_from_llm_list', [])
 
         if field_name in hallucinated_list:
-            return "Red" # Hallucination: LLM present, GT absent
+            return "Hallucinated" # Hallucination: LLM present, GT absent
         
         if field_name in missing_list:
-            return "Yellow" # Missing: GT present, LLM absent
+            return "Missing" # Missing: GT present, LLM absent
 
         # If not hallucinated or missing, it implies both GT and LLM had a value (or both were 'not specified')
         # We now need to check if that value was correct or incorrect.
@@ -77,7 +77,7 @@ class FieldPerformanceVisualizer:
             # This aligns with how evaluator.py stores the accuracy for these fields in detailed_results
             accuracy = record_metrics.get(f'{field_name}_strict_match')
             if accuracy is not None:
-                return "Green" if accuracy == 1.0 else "Orange"
+                return "Correct" if accuracy == 1.0 else "Incorrect"
             else:
                 # This case implies the field was not processed or metrics are missing,
                 # which shouldn't happen if evaluator.py is working correctly.
@@ -89,7 +89,7 @@ class FieldPerformanceVisualizer:
             # This aligns with how evaluator.py stores the binary similarity for these fields in detailed_results
             llm_binary_sim = record_metrics.get(f'{field_name}_llm_binary_similarity')
             if llm_binary_sim is not None:
-                return "Green" if llm_binary_sim == 1.0 else "Orange"
+                return "Correct" if llm_binary_sim == 1.0 else "Incorrect"
             else:
                 logger.warning(f"Text field '{field_name}' had no llm_binary_similarity metric. Defaulting to Neutral.")
                 return "Neutral" # Should ideally not be reached

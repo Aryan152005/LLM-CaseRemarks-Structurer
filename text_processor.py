@@ -7,6 +7,9 @@ from schema import ProcessedOutput, FIELD_VALUE_SCHEMA, ALL_EVENT_SUB_TYPES, der
 import datetime
 from difflib import get_close_matches
 import re
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # Keyword mapping for post-processing recovery (kept for context, not directly used in the fix)
 KEYWORD_EVENT_MAP = {
@@ -136,7 +139,26 @@ def get_few_shot_examples_str():
 class TextProcessor:
     def __init__(self, ollama_base_url: str = "http://localhost:11434"):
         self.ollama_base_url = ollama_base_url
-        self.model_name = "llama3.1:8b" # Chang model with preference
+        
+        # --- Logic for seamless model selection starts here ---
+        # Get LLM provider preference from environment variable, default to 'ollama'
+        # Set LLM_PROVIDER="gemini" in your .env file or system environment to use Gemini
+        self.llm_provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+
+        # Initialize model-specific parameters based on the chosen provider
+        if self.llm_provider == "gemini":
+            self.model_name = "gemini-2.0-flash" 
+            self.api_key = os.getenv("GEMINI_API_KEY")
+            if not self.api_key:
+                logger.warning(
+                    "LLM_PROVIDER is set to 'gemini', but GEMINI_API_KEY is not found in environment variables. "
+                    "Gemini API calls will likely fail. Please set GEMINI_API_KEY."
+                )
+        else: # Default to Ollama if LLM_PROVIDER is not 'gemini' or not set
+            self.model_name = "mistral:7b" # Default Ollama model
+            self.api_key = None # Ollama typically doesn't use an API key in this manner
+        # --- Logic for seamless model selection ends here ---
+
         self.allowed_event_types = FIELD_VALUE_SCHEMA["event_type"]
         self.allowed_event_sub_types = ALL_EVENT_SUB_TYPES
         
@@ -148,9 +170,127 @@ class TextProcessor:
             "need_ambulance": {v.lower(): v for v in ["yes", "no", "not specified", "not applicable"]},
             "children_involved": {v.lower(): v for v in ["yes", "no", "not specified", "not applicable"]},
         }
-        # Uncomment below lines to use Gemini 2.0 Flash model
-        self.api_key = "AIzaSyA6MCrKG5JRtVwRv_Kt43KqFiotRmuvPaA" 
-        self.model_name = "gemini-2.0-flash" 
+
+    # This is now the *single* _call_llm method that handles both providers
+    def _call_llm(self, prompt: str) -> Dict[str, Any]:
+        """
+        Calls the appropriate LLM API (Ollama or Gemini) based on the
+        'LLM_PROVIDER' environment variable set during initialization.
+        """
+        newline_char = '\n'
+        
+        if self.llm_provider == "gemini":
+            # --- Gemini 2.0 Flash LLM logic (formerly commented out) ---
+            if not self.api_key:
+                logger.error("Cannot call Gemini LLM: GEMINI_API_KEY is not set.")
+                raise ValueError("GEMINI_API_KEY is required for Gemini LLM calls.")
+
+            max_retries = 5 
+            retry_delay_seconds = 60 
+
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"TextProcessor calling Gemini LLM with prompt (first 200 chars): {prompt[:200].replace(newline_char, ' ')}... (Attempt {attempt + 1}/{max_retries})")
+                    
+                    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
+
+                    payload = {
+                        "contents": [
+                            {
+                                "role": "user",
+                                "parts": [{"text": prompt}]
+                            }
+                        ],
+                        "generationConfig": {
+                            "temperature": 0.1, 
+                            "maxOutputTokens": 2048 
+                        }
+                    }
+
+                    response = requests.post(
+                        api_url,
+                        headers={'Content-Type': 'application/json'},
+                        json=payload
+                    )
+                    response.raise_for_status() 
+                    
+                    result = response.json()
+
+                    if result.get("candidates") and result["candidates"][0].get("content") and \
+                       result["candidates"][0]["content"].get("parts") and result["candidates"][0]["content"]["parts"][0].get("text"):
+                        generated_text = result["candidates"][0]["content"]["parts"][0]["text"]
+                        logger.info("Successfully received response from Gemini API.")
+                        return {"response": generated_text} 
+                    else:
+                        logger.warning(f"Unexpected response structure from Gemini API: {result}")
+                        return {"response": "Error: Could not parse LLM response."}
+
+                except requests.exceptions.HTTPError as http_err:
+                    if http_err.response.status_code == 429: 
+                        logger.warning(f"Rate limit hit (HTTP 429). Retrying in {retry_delay_seconds} seconds... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(retry_delay_seconds)
+                        # retry_delay_seconds *= 2 
+                    else:
+                        logger.error(f"HTTP Error calling Gemini API: {http_err}. Status Code: {http_err.response.status_code}. Response: {http_err.response.text}")
+                        raise 
+                except requests.exceptions.ConnectionError as ce:
+                    logger.error(f"Connection Error to Gemini API: {ce}. Please check your network connection. (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay_seconds) 
+                except requests.exceptions.RequestException as re:
+                    logger.error(f"General Request Error to Gemini API: {re}. (Attempt {attempt + 1}/{max_retries})")
+                    raise 
+                except Exception as e:
+                    logger.error(f"An unexpected error occurred while calling Gemini LLM: {str(e)}. (Attempt {attempt + 1}/{max_retries})")
+                    raise 
+
+            logger.error(f"Failed to get response from Gemini API after {max_retries} attempts due to persistent rate limiting or other errors.")
+            return {"response": "Error: Failed to get LLM response after multiple retries."}
+
+        else:
+            # --- Ollama LLM logic (original) ---
+            try:
+                logger.info(f"TextProcessor calling Ollama LLM with prompt (first 200 chars): {prompt[:200].replace(newline_char, ' ')}...")
+                
+                response = requests.post(
+                    f"{self.ollama_base_url}/api/generate",
+                    json={
+                        "model": self.model_name,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {
+                            "temperature": 0.1, # Keep temperature low for structured extraction
+                            "num_ctx": 4096 # Adjust context window if prompt is long
+                        }
+                    }
+                )
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.ConnectionError as ce:
+                logger.error(f"Connection Error to Ollama: {ce}. Is Ollama server running at {self.ollama_base_url}?")
+                raise 
+            except requests.exceptions.RequestException as re:
+                logger.error(f"Request Error to Ollama: {re}")
+                raise
+            except Exception as e:
+                logger.error(f"Error calling Ollama LLM: {str(e)}")
+                raise
+    # def __init__(self, ollama_base_url: str = "http://localhost:11434"):
+    #     self.ollama_base_url = ollama_base_url
+    #     self.model_name = "llama3.1:8b" # Chang model with preference
+    #     self.allowed_event_types = FIELD_VALUE_SCHEMA["event_type"]
+    #     self.allowed_event_sub_types = ALL_EVENT_SUB_TYPES
+        
+    #     # Create a mapping for common casing issues for literal fields
+    #     self.literal_field_corrections = {
+    #         "state_of_victim": {val.lower(): val for val in FIELD_VALUE_SCHEMA["state_of_victim"]},
+    #         "victim_gender": {val.lower(): val for val in FIELD_VALUE_SCHEMA["victim_gender"]},
+    #         "repeat_incident": {v.lower(): v for v in ["yes", "no", "not specified", "not applicable"]},
+    #         "need_ambulance": {v.lower(): v for v in ["yes", "no", "not specified", "not applicable"]},
+    #         "children_involved": {v.lower(): v for v in ["yes", "no", "not specified", "not applicable"]},
+    #     }
+    #     # Uncomment below lines to use Gemini 2.0 Flash model
+    #     # self.api_key = os.getenv("GEMINI_API_KEY")
+    #     # self.model_name = "gemini-2.0-flash" 
 
     # def _call_llm(self, prompt: str) -> Dict[str, Any]:
     #     """Call the Ollama LLM API"""
@@ -183,78 +323,78 @@ class TextProcessor:
     #         raise
 
     # Uncomment below method to use Gemini 2.0 Flash model
-    def _call_llm(self, prompt: str) -> Dict[str, Any]:
-        """
-        Call the Gemini 2.0 Flash LLM API with retry logic for rate limits.
-        If a 429 (Too Many Requests) error is encountered, it will wait and retry.
-        """
-        max_retries = 5  # Maximum number of retries
-        retry_delay_seconds = 60 # Initial delay in seconds (e.g., 1 minute)
+    # def _call_llm(self, prompt: str) -> Dict[str, Any]:
+    #     """
+    #     Call the Gemini 2.0 Flash LLM API with retry logic for rate limits.
+    #     If a 429 (Too Many Requests) error is encountered, it will wait and retry.
+    #     """
+    #     max_retries = 5  # Maximum number of retries
+    #     retry_delay_seconds = 60 # Initial delay in seconds (e.g., 1 minute)
 
-        for attempt in range(max_retries):
-            try:
-                newline_char = '\n'
-                logger.info(f"TextProcessor calling LLM with prompt (first 200 chars): {prompt[:200].replace(newline_char, ' ')}... (Attempt {attempt + 1}/{max_retries})")
+    #     for attempt in range(max_retries):
+    #         try:
+    #             newline_char = '\n'
+    #             logger.info(f"TextProcessor calling LLM with prompt (first 200 chars): {prompt[:200].replace(newline_char, ' ')}... (Attempt {attempt + 1}/{max_retries})")
                 
-                # Gemini API endpoint for text generation
-                api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
+    #             # Gemini API endpoint for text generation
+    #             api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
 
-                # Construct the payload for Gemini API
-                payload = {
-                    "contents": [
-                        {
-                            "role": "user",
-                            "parts": [{"text": prompt}]
-                        }
-                    ],
-                    "generationConfig": {
-                        "temperature": 0.1, # Keep temperature low for structured extraction
-                        "maxOutputTokens": 2048 
-                    }
-                }
+    #             # Construct the payload for Gemini API
+    #             payload = {
+    #                 "contents": [
+    #                     {
+    #                         "role": "user",
+    #                         "parts": [{"text": prompt}]
+    #                     }
+    #                 ],
+    #                 "generationConfig": {
+    #                     "temperature": 0.1, # Keep temperature low for structured extraction
+    #                     "maxOutputTokens": 2048 
+    #                 }
+    #             }
 
-                response = requests.post(
-                    api_url,
-                    headers={'Content-Type': 'application/json'},
-                    json=payload
-                )
-                response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
+    #             response = requests.post(
+    #                 api_url,
+    #                 headers={'Content-Type': 'application/json'},
+    #                 json=payload
+    #             )
+    #             response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
                 
-                result = response.json()
+    #             result = response.json()
 
-                # Extract the text from the Gemini API response
-                if result.get("candidates") and result["candidates"][0].get("content") and \
-                   result["candidates"][0]["content"].get("parts") and result["candidates"][0]["content"]["parts"][0].get("text"):
-                    generated_text = result["candidates"][0]["content"]["parts"][0]["text"]
-                    logger.info("Successfully received response from Gemini API.")
-                    return {"response": generated_text} # Return in a similar structure to original
-                else:
-                    logger.warning(f"Unexpected response structure from Gemini API: {result}")
-                    return {"response": "Error: Could not parse LLM response."}
+    #             # Extract the text from the Gemini API response
+    #             if result.get("candidates") and result["candidates"][0].get("content") and \
+    #                result["candidates"][0]["content"].get("parts") and result["candidates"][0]["content"]["parts"][0].get("text"):
+    #                 generated_text = result["candidates"][0]["content"]["parts"][0]["text"]
+    #                 logger.info("Successfully received response from Gemini API.")
+    #                 return {"response": generated_text} # Return in a similar structure to original
+    #             else:
+    #                 logger.warning(f"Unexpected response structure from Gemini API: {result}")
+    #                 return {"response": "Error: Could not parse LLM response."}
 
-            except requests.exceptions.HTTPError as http_err:
-                if http_err.response.status_code == 429: # Rate limit error
-                    logger.warning(f"Rate limit hit (HTTP 429). Retrying in {retry_delay_seconds} seconds... (Attempt {attempt + 1}/{max_retries})")
-                    time.sleep(retry_delay_seconds)
-                    # You might want to increase the delay for subsequent retries (e.g., exponential backoff)
-                    # retry_delay_seconds *= 2 
-                else:
-                    logger.error(f"HTTP Error calling Gemini API: {http_err}. Status Code: {http_err.response.status_code}. Response: {http_err.response.text}")
-                    raise # Re-raise other HTTP errors immediately
-            except requests.exceptions.ConnectionError as ce:
-                logger.error(f"Connection Error to Gemini API: {ce}. Please check your network connection. (Attempt {attempt + 1}/{max_retries})")
-                # For connection errors, you might also want to retry, but with a different strategy or fewer retries
-                time.sleep(retry_delay_seconds) # Wait before retrying connection issues
-            except requests.exceptions.RequestException as re:
-                logger.error(f"General Request Error to Gemini API: {re}. (Attempt {attempt + 1}/{max_retries})")
-                raise # Re-raise other request exceptions
-            except Exception as e:
-                logger.error(f"An unexpected error occurred while calling LLM: {str(e)}. (Attempt {attempt + 1}/{max_retries})")
-                raise # Re-raise any other unexpected errors
+    #         except requests.exceptions.HTTPError as http_err:
+    #             if http_err.response.status_code == 429: # Rate limit error
+    #                 logger.warning(f"Rate limit hit (HTTP 429). Retrying in {retry_delay_seconds} seconds... (Attempt {attempt + 1}/{max_retries})")
+    #                 time.sleep(retry_delay_seconds)
+    #                 # You might want to increase the delay for subsequent retries (e.g., exponential backoff)
+    #                 # retry_delay_seconds *= 2 
+    #             else:
+    #                 logger.error(f"HTTP Error calling Gemini API: {http_err}. Status Code: {http_err.response.status_code}. Response: {http_err.response.text}")
+    #                 raise # Re-raise other HTTP errors immediately
+    #         except requests.exceptions.ConnectionError as ce:
+    #             logger.error(f"Connection Error to Gemini API: {ce}. Please check your network connection. (Attempt {attempt + 1}/{max_retries})")
+    #             # For connection errors, you might also want to retry, but with a different strategy or fewer retries
+    #             time.sleep(retry_delay_seconds) # Wait before retrying connection issues
+    #         except requests.exceptions.RequestException as re:
+    #             logger.error(f"General Request Error to Gemini API: {re}. (Attempt {attempt + 1}/{max_retries})")
+    #             raise # Re-raise other request exceptions
+    #         except Exception as e:
+    #             logger.error(f"An unexpected error occurred while calling LLM: {str(e)}. (Attempt {attempt + 1}/{max_retries})")
+    #             raise # Re-raise any other unexpected errors
 
-        # If all retries are exhausted without success
-        logger.error(f"Failed to get response from Gemini API after {max_retries} attempts due to persistent rate limiting or other errors.")
-        return {"response": "Error: Failed to get LLM response after multiple retries."}
+    #     # If all retries are exhausted without success
+    #     logger.error(f"Failed to get response from Gemini API after {max_retries} attempts due to persistent rate limiting or other errors.")
+    #     return {"response": "Error: Failed to get LLM response after multiple retries."}
 
 
     def _create_extraction_prompt(self, text: str) -> str:

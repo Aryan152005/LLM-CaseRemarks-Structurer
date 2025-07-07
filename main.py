@@ -12,12 +12,12 @@ from visualizer import Visualizer
 from field_performance_visualizer import FieldPerformanceVisualizer
 
 # =================== CONFIGURABLE PATHS ===================
-DATA_FOLDER = "test_data/english/eng_test_text_files_for_evaluation"
+DATA_FOLDER = "test_data/hindi/hindi_42_txt"
 GROUND_TRUTH_PATH = "test_data/english/cleaned_new_40_eng.json"
-OUTPUT_BASE_PATH = "results_english/gemini_results/predictions"
-CSV_OUTPUT_PATH = "results_english/gemini_results/predictions.csv"
-EVAL_RESULTS_BASE = "results_english/gemini_results/evaluation_results"
-VISUALIZATION_DIR = "results_english/gemini_results/visualizations"
+OUTPUT_BASE_PATH = "results_hindi/mistral_results/predictions"
+CSV_OUTPUT_PATH = "results_hindi/mistral_results/predictions.csv"
+EVAL_RESULTS_BASE = "results_hindi/mistral_results/evaluation_results"
+VISUALIZATION_DIR = "results_hindi/mistral_results/visualizations"
 LOG_FILE = "file.log"
 
 BATCH_SIZE = 10  # Save after every 10 files
