@@ -139,29 +139,54 @@ def get_few_shot_examples_str():
 class TextProcessor:
     def __init__(self, ollama_base_url: str = "http://localhost:11434"):
         self.ollama_base_url = ollama_base_url
-        
+
         # --- Logic for seamless model selection starts here ---
-        # Get LLM provider preference from environment variable, default to 'ollama'
-        # Set LLM_PROVIDER="gemini" in your .env file or system environment to use Gemini
-        self.llm_provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+        # Get LLM provider preference from environment variable, default to 'none' to force explicit selection
+        self.llm_provider = os.getenv("LLM_PROVIDER", "none").lower() 
 
         # Initialize model-specific parameters based on the chosen provider
         if self.llm_provider == "gemini":
-            self.model_name = "gemini-2.0-flash" 
+            self.model_name = "gemini-2.0-flash"
             self.api_key = os.getenv("GEMINI_API_KEY")
             if not self.api_key:
                 logger.warning(
                     "LLM_PROVIDER is set to 'gemini', but GEMINI_API_KEY is not found in environment variables. "
                     "Gemini API calls will likely fail. Please set GEMINI_API_KEY."
                 )
-        else: # Default to Ollama if LLM_PROVIDER is not 'gemini' or not set
+            self.hf_api_url = None # Not applicable for Gemini
+            print(f"TextProcessor initialized: Using LLM Provider: Gemini ({self.model_name})") # Print statement
+        elif self.llm_provider == "gemma-hf":
+            self.model_name = "google/gemma-3-12b-it"
+            self.api_key = os.getenv("HUGGINGFACE_API_KEY") 
+            if not self.api_key:
+                logger.warning(
+                    "LLM_PROVIDER is set to 'gemma-hf', but HUGGINGFACE_API_KEY is not found in environment variables. "
+                    "Hugging Face Inference API calls will likely fail. Please set HUGGINGFACE_API_KEY."
+                )
+            self.hf_api_url = f"https://api-inference.huggingface.co/models/{self.model_name}"
+            print(f"TextProcessor initialized: Using LLM Provider: Hugging Face ({self.model_name})") # Print statement
+        elif self.llm_provider == "ollama": 
             self.model_name = "mistral:7b" # Default Ollama model
             self.api_key = None # Ollama typically doesn't use an API key in this manner
+            self.hf_api_url = None # Not applicable for Ollama
+            print(f"TextProcessor initialized: Using LLM Provider: Ollama ({self.model_name})") # Print statement
+        else: 
+            self.model_name = None
+            self.api_key = None
+            self.hf_api_url = None
+            error_message = (
+                f"Invalid LLM_PROVIDER specified: '{self.llm_provider}'. "
+                "Supported providers are 'gemini', 'gemma-hf', or 'ollama'. "
+                "Please set the LLM_PROVIDER environment variable correctly."
+            )
+            logger.error(error_message)
+            print(f"TextProcessor initialization failed: {error_message}") # Print statement for error
+            raise ValueError("Error: Invalid LLM_PROVIDER specified. Cannot initialize TextProcessor.")
         # --- Logic for seamless model selection ends here ---
 
         self.allowed_event_types = FIELD_VALUE_SCHEMA["event_type"]
         self.allowed_event_sub_types = ALL_EVENT_SUB_TYPES
-        
+
         # Create a mapping for common casing issues for literal fields
         self.literal_field_corrections = {
             "state_of_victim": {val.lower(): val for val in FIELD_VALUE_SCHEMA["state_of_victim"]},
@@ -171,27 +196,31 @@ class TextProcessor:
             "children_involved": {v.lower(): v for v in ["yes", "no", "not specified", "not applicable"]},
         }
 
-    # This is now the *single* _call_llm method that handles both providers
+    # This is now the *single* _call_llm method that handles all providers
     def _call_llm(self, prompt: str) -> Dict[str, Any]:
         """
-        Calls the appropriate LLM API (Ollama or Gemini) based on the
+        Calls the appropriate LLM API (Ollama, Gemini, or Hugging Face Gemma) based on the
         'LLM_PROVIDER' environment variable set during initialization.
         """
         newline_char = '\n'
         
+        if self.model_name is None:
+            logger.error("LLM model not initialized due to an invalid LLM_PROVIDER. Cannot call LLM.")
+            return {"response": "Error: LLM model not configured properly."}
+
         if self.llm_provider == "gemini":
-            # --- Gemini 2.0 Flash LLM logic (formerly commented out) ---
+            # --- Gemini 2.0 Flash LLM logic ---
             if not self.api_key:
                 logger.error("Cannot call Gemini LLM: GEMINI_API_KEY is not set.")
                 raise ValueError("GEMINI_API_KEY is required for Gemini LLM calls.")
 
-            max_retries = 5 
-            retry_delay_seconds = 60 
+            max_retries = 5
+            retry_delay_seconds = 60
 
             for attempt in range(max_retries):
                 try:
                     logger.info(f"TextProcessor calling Gemini LLM with prompt (first 200 chars): {prompt[:200].replace(newline_char, ' ')}... (Attempt {attempt + 1}/{max_retries})")
-                    
+
                     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
 
                     payload = {
@@ -202,8 +231,8 @@ class TextProcessor:
                             }
                         ],
                         "generationConfig": {
-                            "temperature": 0.1, 
-                            "maxOutputTokens": 2048 
+                            "temperature": 0.1,
+                            "maxOutputTokens": 2048
                         }
                     }
 
@@ -212,45 +241,100 @@ class TextProcessor:
                         headers={'Content-Type': 'application/json'},
                         json=payload
                     )
-                    response.raise_for_status() 
-                    
+                    response.raise_for_status()
+
                     result = response.json()
 
                     if result.get("candidates") and result["candidates"][0].get("content") and \
-                       result["candidates"][0]["content"].get("parts") and result["candidates"][0]["content"]["parts"][0].get("text"):
+                            result["candidates"][0]["content"].get("parts") and result["candidates"][0]["content"]["parts"][0].get("text"):
                         generated_text = result["candidates"][0]["content"]["parts"][0]["text"]
                         logger.info("Successfully received response from Gemini API.")
-                        return {"response": generated_text} 
+                        return {"response": generated_text}
                     else:
                         logger.warning(f"Unexpected response structure from Gemini API: {result}")
                         return {"response": "Error: Could not parse LLM response."}
 
                 except requests.exceptions.HTTPError as http_err:
-                    if http_err.response.status_code == 429: 
+                    if http_err.response.status_code == 429:
                         logger.warning(f"Rate limit hit (HTTP 429). Retrying in {retry_delay_seconds} seconds... (Attempt {attempt + 1}/{max_retries})")
                         time.sleep(retry_delay_seconds)
-                        # retry_delay_seconds *= 2 
                     else:
                         logger.error(f"HTTP Error calling Gemini API: {http_err}. Status Code: {http_err.response.status_code}. Response: {http_err.response.text}")
-                        raise 
+                        raise
                 except requests.exceptions.ConnectionError as ce:
                     logger.error(f"Connection Error to Gemini API: {ce}. Please check your network connection. (Attempt {attempt + 1}/{max_retries})")
-                    time.sleep(retry_delay_seconds) 
+                    time.sleep(retry_delay_seconds)
                 except requests.exceptions.RequestException as re:
                     logger.error(f"General Request Error to Gemini API: {re}. (Attempt {attempt + 1}/{max_retries})")
-                    raise 
+                    raise
                 except Exception as e:
                     logger.error(f"An unexpected error occurred while calling Gemini LLM: {str(e)}. (Attempt {attempt + 1}/{max_retries})")
-                    raise 
+                    raise
 
             logger.error(f"Failed to get response from Gemini API after {max_retries} attempts due to persistent rate limiting or other errors.")
             return {"response": "Error: Failed to get LLM response after multiple retries."}
 
-        else:
-            # --- Ollama LLM logic (original) ---
+        elif self.llm_provider == "gemma-hf":
+            # --- Hugging Face Gemma 3 12B LLM logic ---
+            if not self.api_key:
+                logger.error("Cannot call Hugging Face Inference API: HUGGINGFACE_API_KEY is not set.")
+                raise ValueError("HUGGINGFACE_API_KEY is required for Hugging Face Inference API calls.")
+
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            payload = {
+                "inputs": prompt,
+                "parameters": {
+                    "temperature": 0.1,
+                    "max_new_tokens": 2048,
+                    "return_full_text": False 
+                }
+            }
+            
+            max_retries = 5
+            retry_delay_seconds = 10 
+
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"TextProcessor calling Hugging Face Gemma LLM with prompt (first 200 chars): {prompt[:200].replace(newline_char, ' ')}... (Attempt {attempt + 1}/{max_retries})")
+
+                    response = requests.post(self.hf_api_url, headers=headers, json=payload)
+                    response.raise_for_status() 
+
+                    result = response.json()
+                    
+                    if isinstance(result, list) and result and "generated_text" in result[0]:
+                        generated_text = result[0]["generated_text"]
+                        logger.info("Successfully received response from Hugging Face Gemma API.")
+                        return {"response": generated_text}
+                    else:
+                        logger.warning(f"Unexpected response structure from Hugging Face Gemma API: {result}")
+                        return {"response": "Error: Could not parse LLM response from Hugging Face."}
+
+                except requests.exceptions.HTTPError as http_err:
+                    if http_err.response.status_code == 429:
+                        logger.warning(f"Rate limit hit (HTTP 429). Retrying in {retry_delay_seconds} seconds... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(retry_delay_seconds)
+                    else:
+                        logger.error(f"HTTP Error calling Hugging Face Gemma API: {http_err}. Status Code: {http_err.response.status_code}. Response: {http_err.response.text}")
+                        raise
+                except requests.exceptions.ConnectionError as ce:
+                    logger.error(f"Connection Error to Hugging Face Gemma API: {ce}. Please check your network connection. (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay_seconds)
+                except requests.exceptions.RequestException as re:
+                    logger.error(f"General Request Error to Hugging Face Gemma API: {re}. (Attempt {attempt + 1}/{max_retries})")
+                    raise
+                except Exception as e:
+                    logger.error(f"An unexpected error occurred while calling Hugging Face Gemma LLM: {str(e)}. (Attempt {attempt + 1}/{max_retries})")
+                    raise
+            
+            logger.error(f"Failed to get response from Hugging Face Gemma API after {max_retries} attempts due to persistent rate limiting or other errors.")
+            return {"response": "Error: Failed to get LLM response from Hugging Face after multiple retries."}
+
+        elif self.llm_provider == "ollama": 
+            # --- Ollama LLM logic ---
             try:
                 logger.info(f"TextProcessor calling Ollama LLM with prompt (first 200 chars): {prompt[:200].replace(newline_char, ' ')}...")
-                
+
                 response = requests.post(
                     f"{self.ollama_base_url}/api/generate",
                     json={
@@ -258,8 +342,8 @@ class TextProcessor:
                         "prompt": prompt,
                         "stream": False,
                         "options": {
-                            "temperature": 0.1, # Keep temperature low for structured extraction
-                            "num_ctx": 4096 # Adjust context window if prompt is long
+                            "temperature": 0.1, 
+                            "num_ctx": 4096 
                         }
                     }
                 )
@@ -267,13 +351,17 @@ class TextProcessor:
                 return response.json()
             except requests.exceptions.ConnectionError as ce:
                 logger.error(f"Connection Error to Ollama: {ce}. Is Ollama server running at {self.ollama_base_url}?")
-                raise 
+                raise
             except requests.exceptions.RequestException as re:
                 logger.error(f"Request Error to Ollama: {re}")
                 raise
             except Exception as e:
                 logger.error(f"Error calling Ollama LLM: {str(e)}")
                 raise
+        else:
+            logger.error(f"No valid LLM provider '{self.llm_provider}' recognized. Cannot call LLM.")
+            return {"response": "Error: LLM provider not correctly configured or recognized."}
+
     # def __init__(self, ollama_base_url: str = "http://localhost:11434"):
     #     self.ollama_base_url = ollama_base_url
     #     self.model_name = "llama3.1:8b" # Chang model with preference

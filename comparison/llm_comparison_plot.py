@@ -3,13 +3,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import re # Import regex for cleaner metric names
 
 # --- Configuration: IMPORTANT! Replace with your actual JSON file paths ---
-LLM_NAMES = ["gemini2.0", "llama3.2:8b", "mistral:7b"] # Give meaningful names to your LLMs
+LLM_NAMES = ["llama3.1:8b", "mistral:7b", "granite3,1:8b"] # Give meaningful names to your LLMs
 JSON_FILES = [
-    "../results_english/gemini_results/visualizations/field_status_summary/aggregate_metrics.json", # <--- REPLACE THIS WITH THE ACTUAL PATH TO YOUR FIRST LLM's JSON
     "../results_english/llama_results/visualizations/field_status_summary/aggregate_metrics.json", # <--- REPLACE THIS WITH THE ACTUAL PATH TO YOUR SECOND LLM's JSON
-    "../results_english/mistral_results/visualizations/field_status_summary/aggregate_metrics.json"  # <--- REPLACE THIS WITH THE ACTUAL PATH TO YOUR THIRD LLM's JSON
+    "../results_english/mistral_results/visualizations/field_status_summary/aggregate_metrics.json",
+    "../results_english/granite_results/visualizations/field_status_summary/aggregate_metrics.json",
 ]
 
 def load_and_flatten_data(json_files, llm_names):
@@ -23,7 +24,8 @@ def load_and_flatten_data(json_files, llm_names):
             with open(file_path, 'r') as f:
                 data = json.load(f)
         except FileNotFoundError:
-            print(f"Error: JSON file not found at {file_path}. Please check the path.")
+            print(f"Error: JSON file not found at {file_path}. Please check the path and ensure the file exists.")
+            # Skip this LLM if its file is not found, ensuring consistency between LLM_NAMES and loaded data
             continue
         except json.JSONDecodeError:
             print(f"Error: Could not decode JSON from {file_path}. Check file format.")
@@ -39,11 +41,10 @@ def load_and_flatten_data(json_files, llm_names):
                 # Handle nested dictionaries
                 if key == "completeness_metrics":
                     flat_data["mean_completeness_score"] = value.get("mean_completeness_score")
-                    # flat_data["std_completeness_score"] = value.get("std_completeness_score") # Can add if needed for error bars
+                    flat_data["std_completeness_score"] = value.get("std_completeness_score") # Added std for potential error bars
                 elif key == "hallucination_metrics":
                     flat_data["overall_hallucination_percentage"] = value.get("overall_hallucination_percentage")
                     # Field-wise hallucination will be handled separately due to its structure
-                    # Store field-wise as a dictionary within the flat_data for later processing
                     flat_data["field_wise_hallucination_percentage"] = value.get("field_wise_hallucination_percentage", {})
                 elif key == "missing_from_llm_metrics":
                     flat_data["total_missing_from_llm_fields"] = value.get("total_missing_from_llm_fields")
@@ -55,48 +56,117 @@ def load_and_flatten_data(json_files, llm_names):
                     flat_data["total_incorrect_fields"] = value.get("total_incorrect_fields")
                     flat_data["mean_incorrect_fields_per_record"] = value.get("mean_incorrect_fields_per_record")
         all_llm_data.append(flat_data)
-    return pd.DataFrame(all_llm_data)
+    
+    # Create DataFrame from successfully loaded data
+    df = pd.DataFrame(all_llm_data)
 
-def plot_metrics_comparison(df, metrics, title_prefix, ylabel, filename):
+    # --- Clean up metric names for better plotting ---
+    renamed_columns = {}
+    for col in df.columns:
+        if col not in ['LLM', 'field_wise_hallucination_percentage', 'std_completeness_score']: # Exclude special columns
+            clean_name = col.replace('_strict_accuracy', ' (Strict Acc.)') \
+                             .replace('_fuzzy_accuracy', ' (Fuzzy Acc.)') \
+                             .replace('_jaccard_mean', ' (Jaccard Mean)') \
+                             .replace('_bleu_mean', ' (BLEU Mean)') \
+                             .replace('_rouge_1_mean', ' (ROUGE-1 Mean)') \
+                             .replace('_rouge_2_mean', ' (ROUGE-2 Mean)') \
+                             .replace('_rouge_l_mean', ' (ROUGE-L Mean)') \
+                             .replace('_llm_similarity_mean', ' (LLM Sim. Mean)') \
+                             .replace('_llm_binary_similarity_mean', ' (LLM Binary Sim. Mean)') \
+                             .replace('mean_completeness_score', 'Completeness Score') \
+                             .replace('overall_hallucination_percentage', 'Overall Hallucination %') \
+                             .replace('total_hallucinated_fields', 'Total Hallucinated Fields') \
+                             .replace('mean_hallucinated_fields_per_record', 'Mean Hallucinated Fields / Record') \
+                             .replace('total_missing_from_llm_fields', 'Total Missing Fields') \
+                             .replace('mean_missing_from_llm_fields_per_record', 'Mean Missing Fields / Record') \
+                             .replace('total_correct_fields', 'Total Correct Fields') \
+                             .replace('mean_correct_fields_per_record', 'Mean Correct Fields / Record') \
+                             .replace('total_incorrect_fields', 'Total Incorrect Fields') \
+                             .replace('mean_incorrect_fields_per_record', 'Mean Incorrect Fields / Record')
+
+            # Capitalize the first letter of the actual field name (e.g., 'name' -> 'Name')
+            clean_name = re.sub(r'(\b\w)', lambda x: x.group(1).upper(), clean_name)
+            clean_name = clean_name.replace('_', ' ') # Replace remaining underscores with spaces
+            clean_name = clean_name.strip() # Remove any leading/trailing spaces
+
+            renamed_columns[col] = clean_name
+    
+    df.rename(columns=renamed_columns, inplace=True)
+    return df
+
+def plot_metrics_comparison(df, metrics, title_prefix, ylabel, filename, y_lim=None):
     """
     Plots a bar chart comparing LLMs for a given set of metrics.
+    Improvements for visibility:
+    - Adjusted Y-axis limit with padding to prevent label clipping.
+    - `clip_on=False` for bar labels to ensure they are always visible.
+    - Increased figure width to better accommodate many metrics.
     """
-    # Ensure all specified metrics exist in the DataFrame
+    # Ensure all specified metrics exist in the DataFrame, using their *renamed* names
     valid_metrics = [m for m in metrics if m in df.columns]
+
     if not valid_metrics:
         print(f"Warning: No valid metrics found in DataFrame for {title_prefix}. Skipping plot.")
         return
 
-    # Filter columns to only include the metrics of interest and 'LLM'
     plot_df = df[['LLM'] + valid_metrics].melt(id_vars='LLM', var_name='Metric', value_name='Score')
 
-    plt.figure(figsize=(12, 7))
-    sns.barplot(x='Metric', y='Score', hue='LLM', data=plot_df, palette='viridis')
-    plt.title(f'{title_prefix} Comparison')
-    plt.ylabel(ylabel)
-    plt.xlabel('Metric')
-    plt.xticks(rotation=45, ha='right')
-    plt.legend(title='LLM')
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.savefig(f"{filename}.png")
+    # Dynamically adjust figure width based on number of metrics
+    num_metrics = len(valid_metrics)
+    fig_width = max(14, num_metrics * 1.5 + len(df['LLM'].unique()) * 0.5) 
+    plt.figure(figsize=(fig_width, 8)) 
+    
+    ax = sns.barplot(x='Metric', y='Score', hue='LLM', data=plot_df, palette='Paired', errorbar=None) 
+
+    plt.title(f'{title_prefix} Comparison', fontsize=16) 
+    plt.ylabel(ylabel, fontsize=12)
+    plt.xlabel('Metric', fontsize=12)
+    plt.xticks(rotation=60, ha='right', fontsize=10) 
+    plt.yticks(fontsize=10)
+    
+    # --- Legend inside the plot ---
+    plt.legend(title='LLM', loc='upper right', ncol=1, fontsize=10, title_fontsize=12) 
+
+    # Set Y-axis limits
+    if y_lim:
+        plt.ylim(y_lim)
+    else:
+        max_score = plot_df['Score'].max()
+        plt.ylim(0, max_score * 1.15 if max_score * 1.15 > 1 else 1.05) 
+
+    # Add value annotations on top of bars
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.2f', label_type='edge', padding=5, fontsize=9, clip_on=False) 
+
+    plt.grid(axis='y', linestyle='--', alpha=0.6) 
+    plt.tight_layout() 
+    plt.savefig(f"{filename}.png", dpi=300) 
     plt.close()
 
 def plot_field_wise_hallucination(raw_llm_data, llm_names, filename="field_wise_hallucination_comparison"):
     """
-    Plots field-wise hallucination percentages for all LLMs.
-    Takes a list of individual LLM raw data dictionaries to handle nested structure.
+    Plots a STACKED bar chart for field-wise hallucination percentages,
+    with individual percentage values printed on each stack segment.
     """
     all_field_hallucination_data = []
-    for i, data_dict in enumerate(raw_llm_data):
-        llm_name = llm_names[i]
-        field_hallucination = data_dict.get("hallucination_metrics", {}).get("field_wise_hallucination_percentage", {})
-        for field, percentage in field_hallucination.items():
-            all_field_hallucination_data.append({
-                "LLM": llm_name,
-                "Field": field,
-                "Hallucination Percentage": percentage
-            })
+    loaded_llm_names = [] 
+    for i, file_path in enumerate(JSON_FILES):
+        try:
+            with open(file_path, 'r') as f:
+                data_dict = json.load(f)
+                llm_name = llm_names[i]
+                field_hallucination = data_dict.get("hallucination_metrics", {}).get("field_wise_hallucination_percentage", {})
+                for field, percentage in field_hallucination.items():
+                    all_field_hallucination_data.append({
+                        "LLM": llm_name,
+                        "Field": field,
+                        "Hallucination Percentage": percentage
+                    })
+                loaded_llm_names.append(llm_name) 
+        except FileNotFoundError:
+            print(f"Skipping {file_path} for field-wise hallucination due to FileNotFoundError.")
+        except json.JSONDecodeError:
+            print(f"Skipping {file_path} for field-wise hallucination due to JSONDecodeError.")
 
     if not all_field_hallucination_data:
         print("No field-wise hallucination data to plot.")
@@ -104,108 +174,148 @@ def plot_field_wise_hallucination(raw_llm_data, llm_names, filename="field_wise_
 
     plot_df = pd.DataFrame(all_field_hallucination_data)
 
-    plt.figure(figsize=(15, 8))
-    sns.barplot(x='Field', y='Hallucination Percentage', hue='LLM', data=plot_df, palette='magma')
-    plt.title('Field-wise Hallucination Percentage Comparison')
-    plt.ylabel('Hallucination Percentage (%)')
-    plt.xlabel('Field')
-    plt.xticks(rotation=90, ha='right')
-    plt.legend(title='LLM')
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.savefig(f"{filename}.png")
+    # Sort fields by total hallucination percentage for better readability
+    field_order = plot_df.groupby('Field')['Hallucination Percentage'].sum().sort_values(ascending=False).index
+
+    plt.figure(figsize=(16, 9)) 
+    
+    # Pivot the data for stacking: fields as index, LLMs as columns, percentages as values
+    pivot_df = plot_df.pivot(index='Field', columns='LLM', values='Hallucination Percentage').loc[field_order]
+    
+    # Plotting the stacked bar chart directly from the pivoted DataFrame
+    ax = pivot_df.plot(kind='bar', stacked=True, figsize=(16, 9), cmap='Paired', ax=plt.gca())
+    
+    plt.title('Field-wise Hallucination Percentage Comparison (Stacked by LLM)', fontsize=16)
+    plt.ylabel('Total Hallucination Percentage (%) per Field', fontsize=12)
+    plt.xlabel('Field', fontsize=12)
+    plt.xticks(rotation=70, ha='right', fontsize=10) 
+    plt.yticks(fontsize=10)
+    
+    # --- Legend inside the plot ---
+    plt.legend(title='LLM', loc='upper right', ncol=1, fontsize=10, title_fontsize=12) 
+
+    plt.grid(axis='y', linestyle='--', alpha=0.6)
+    
+    # Calculate the max possible sum for y_lim, adding a buffer
+    max_total_hallucination = pivot_df.sum(axis=1).max()
+    # Add a larger buffer if needed to accommodate labels within bars, or a small buffer for totals above
+    plt.ylim(0, max_total_hallucination * 1.10) # 10% buffer for totals above
+
+    # --- Add labels for each segment ---
+    # Iterate over each column (LLM) in the pivoted DataFrame
+    # This creates a baseline for stacking the text labels
+    y_offset = np.zeros(len(pivot_df)) # Stores the current cumulative height for each bar
+
+    # Loop through each LLM (column in pivot_df)
+    for col_idx, col_name in enumerate(pivot_df.columns):
+        # Loop through each field (row in pivot_df)
+        for row_idx, field_name in enumerate(pivot_df.index):
+            value = pivot_df.iloc[row_idx, col_idx]
+
+            if value > 0.5:  # Only label segments that are large enough to be readable (e.g., > 0.5%)
+                # Calculate the exact position for the label
+                # x-position is the bar's center
+                x_pos = row_idx
+                # y-position is the baseline + half of the current segment's height
+                y_pos = y_offset[row_idx] + value / 2
+
+                ax.text(x_pos, y_pos, f'{value:.1f}', 
+                        ha='center', va='center', fontsize=8, color='white', 
+                        fontweight='bold', clip_on=False)
+            
+            # Update the offset for the next segment in the same bar
+            y_offset[row_idx] += value
+
+    # You can choose to also add total labels on top of the bars if desired,
+    # but individual segment labels usually mean you don't need totals.
+    # If you want totals, uncomment and adjust the following:
+    # for i, total_val in enumerate(pivot_df.sum(axis=1)):
+    #     ax.text(i, total_val + (max_total_hallucination * 0.02), f'{total_val:.1f}', 
+    #             ha='center', va='bottom', fontsize=9, color='black', clip_on=False)
+
+
+    plt.tight_layout() 
+    plt.savefig(f"{filename}.png", dpi=300)
     plt.close()
 
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    # Load all raw JSON data for special handling of nested structures like field_wise_hallucination
-    raw_llm_data = []
-    for file_path in JSON_FILES:
+    raw_json_data_for_field_wise = []
+    actual_llm_names_loaded = [] 
+
+    for i, file_path in enumerate(JSON_FILES):
         try:
             with open(file_path, 'r') as f:
-                raw_llm_data.append(json.load(f))
+                data = json.load(f)
+                raw_json_data_for_field_wise.append(data)
+                actual_llm_names_loaded.append(LLM_NAMES[i])
         except FileNotFoundError:
-            print(f"Skipping {file_path} as it was not found.")
-            # If a file is missing, we need to ensure the raw_llm_data and LLM_NAMES lists remain consistent
-            # A more robust solution might involve removing the LLM from LLM_NAMES entirely
-            # For simplicity here, we'll just skip and print a warning.
-            # You might want to implement more robust error handling for production.
+            print(f"Skipping {file_path} as it was not found. This LLM will be excluded from plots.")
+            continue 
         except json.JSONDecodeError:
-            print(f"Skipping {file_path} due to JSON decoding error.")
+            print(f"Skipping {file_path} due to JSON decoding error. This LLM will be excluded from plots.")
+            continue
 
-    if len(raw_llm_data) != len(JSON_FILES):
-        print("Warning: Mismatch between number of loaded JSON files and expected files. Plots might be incomplete.")
-
-    # Prepare data for general plotting (flattened version)
-    # We pass JSON_FILES and LLM_NAMES directly for consistent handling
-    df_comparison = load_and_flatten_data(JSON_FILES, LLM_NAMES)
-
-    if df_comparison.empty:
-        print("No data loaded for comparison. Exiting.")
+    if not actual_llm_names_loaded:
+        print("No LLM data successfully loaded. Exiting.")
     else:
-        # --- Define Metric Categories for Plotting ---
+        df_comparison = load_and_flatten_data([JSON_FILES[i] for i, name in enumerate(LLM_NAMES) if name in actual_llm_names_loaded], actual_llm_names_loaded)
 
-        # Strict Accuracy Metrics
-        strict_accuracy_metrics = [col for col in df_comparison.columns if "_strict_accuracy" in col]
-        plot_metrics_comparison(df_comparison, strict_accuracy_metrics, "Strict Accuracy", "Accuracy Score", "strict_accuracy_comparison")
+        if df_comparison.empty:
+            print("No data loaded for comparison. Exiting.")
+        else:
+            print(f"Successfully loaded data for LLMs: {', '.join(actual_llm_names_loaded)}")
+            
+            # --- Define Metric Categories for Plotting (using original names for selection) ---
 
-        # Fuzzy Accuracy Metrics
-        fuzzy_accuracy_metrics = [col for col in df_comparison.columns if "_fuzzy_accuracy" in col]
-        plot_metrics_comparison(df_comparison, fuzzy_accuracy_metrics, "Fuzzy Accuracy", "Accuracy Score", "fuzzy_accuracy_comparison")
+            strict_accuracy_metrics = [col for col in df_comparison.columns if " (Strict Acc.)" in col]
+            plot_metrics_comparison(df_comparison, strict_accuracy_metrics, "Strict Accuracy", "Accuracy Score", "strict_accuracy_comparison", y_lim=[0,1])
 
-        # Jaccard Similarity Metrics
-        jaccard_metrics = [col for col in df_comparison.columns if "_jaccard_mean" in col]
-        plot_metrics_comparison(df_comparison, jaccard_metrics, "Jaccard Similarity (Mean)", "Jaccard Score", "jaccard_similarity_comparison")
+            fuzzy_accuracy_metrics = [col for col in df_comparison.columns if " (Fuzzy Acc.)" in col]
+            plot_metrics_comparison(df_comparison, fuzzy_accuracy_metrics, "Fuzzy Accuracy", "Accuracy Score", "fuzzy_accuracy_comparison", y_lim=[0,1])
 
-        # BLEU Similarity Metrics
-        bleu_metrics = [col for col in df_comparison.columns if "_bleu_mean" in col]
-        plot_metrics_comparison(df_comparison, bleu_metrics, "BLEU Similarity (Mean)", "BLEU Score", "bleu_similarity_comparison")
+            jaccard_metrics = [col for col in df_comparison.columns if " (Jaccard Mean)" in col]
+            plot_metrics_comparison(df_comparison, jaccard_metrics, "Jaccard Similarity (Mean)", "Jaccard Score", "jaccard_similarity_comparison", y_lim=[0,1])
 
-        # ROUGE-1 Similarity Metrics
-        rouge1_metrics = [col for col in df_comparison.columns if "_rouge_1_mean" in col]
-        plot_metrics_comparison(df_comparison, rouge1_metrics, "ROUGE-1 Similarity (Mean)", "ROUGE-1 Score", "rouge1_similarity_comparison")
+            bleu_metrics = [col for col in df_comparison.columns if " (BLEU Mean)" in col]
+            plot_metrics_comparison(df_comparison, bleu_metrics, "BLEU Similarity (Mean)", "BLEU Score", "bleu_similarity_comparison", y_lim=[0,1])
 
-        # ROUGE-2 Similarity Metrics
-        rouge2_metrics = [col for col in df_comparison.columns if "_rouge_2_mean" in col]
-        plot_metrics_comparison(df_comparison, rouge2_metrics, "ROUGE-2 Similarity (Mean)", "ROUGE-2 Score", "rouge2_similarity_comparison")
+            rouge1_metrics = [col for col in df_comparison.columns if " (ROUGE-1 Mean)" in col]
+            plot_metrics_comparison(df_comparison, rouge1_metrics, "ROUGE-1 Similarity (Mean)", "ROUGE-1 Score", "rouge1_similarity_comparison", y_lim=[0,1])
 
-        # ROUGE-L Similarity Metrics
-        rougel_metrics = [col for col in df_comparison.columns if "_rouge_l_mean" in col]
-        plot_metrics_comparison(df_comparison, rougel_metrics, "ROUGE-L Similarity (Mean)", "ROUGE-L Score", "rougel_similarity_comparison")
+            rouge2_metrics = [col for col in df_comparison.columns if " (ROUGE-2 Mean)" in col]
+            plot_metrics_comparison(df_comparison, rouge2_metrics, "ROUGE-2 Similarity (Mean)", "ROUGE-2 Score", "rouge2_similarity_comparison", y_lim=[0,1])
 
-        # LLM Similarity Metrics
-        llm_similarity_metrics = [col for col in df_comparison.columns if "_llm_similarity_mean" in col and "binary" not in col]
-        plot_metrics_comparison(df_comparison, llm_similarity_metrics, "LLM Similarity (Mean)", "LLM Similarity Score", "llm_similarity_comparison")
+            rougel_metrics = [col for col in df_comparison.columns if " (ROUGE-L Mean)" in col]
+            plot_metrics_comparison(df_comparison, rougel_metrics, "ROUGE-L Similarity (Mean)", "ROUGE-L Score", "rougel_similarity_comparison", y_lim=[0,1])
 
-        # LLM Binary Similarity Metrics
-        llm_binary_similarity_metrics = [col for col in df_comparison.columns if "_llm_binary_similarity_mean" in col]
-        plot_metrics_comparison(df_comparison, llm_binary_similarity_metrics, "LLM Binary Similarity (Mean)", "LLM Binary Similarity Score", "llm_binary_similarity_comparison")
+            llm_similarity_metrics = [col for col in df_comparison.columns if " (LLM Sim. Mean)" in col]
+            plot_metrics_comparison(df_comparison, llm_similarity_metrics, "LLM Similarity (Mean)", "LLM Similarity Score", "llm_similarity_comparison", y_lim=[0,1])
 
-        # Completeness Metrics
-        completeness_metrics = ["mean_completeness_score"]
-        plot_metrics_comparison(df_comparison, completeness_metrics, "Completeness", "Score (%)", "completeness_comparison")
+            llm_binary_similarity_metrics = [col for col in df_comparison.columns if " (LLM Binary Sim. Mean)" in col]
+            plot_metrics_comparison(df_comparison, llm_binary_similarity_metrics, "LLM Binary Similarity (Mean)", "LLM Binary Similarity Score", "llm_binary_similarity_comparison", y_lim=[0, 1.05]) 
 
-        # Hallucination Metrics (Overall)
-        overall_hallucination_metrics = ["overall_hallucination_percentage"]
-        plot_metrics_comparison(df_comparison, overall_hallucination_metrics, "Overall Hallucination Percentage", "Percentage (%)", "overall_hallucination_comparison")
+            completeness_metrics = ["Completeness Score"] 
+            plot_metrics_comparison(df_comparison, completeness_metrics, "Completeness", "Score (%)", "completeness_comparison", y_lim=[0,100])
 
-        # Field-wise Hallucination (special handling due to nested dictionary)
-        # We use the raw_llm_data here because 'field_wise_hallucination_percentage' is a nested dict
-        plot_field_wise_hallucination(raw_llm_data, LLM_NAMES)
+            overall_hallucination_metrics = ["Overall Hallucination %"] 
+            plot_metrics_comparison(df_comparison, overall_hallucination_metrics, "Overall Hallucination Percentage", "Percentage (%)", "overall_hallucination_comparison", y_lim=[0,100])
 
-        # Summary Metrics (can be grouped or plotted individually as needed)
-        summary_metrics = [
-            "total_hallucinated_fields",
-            "mean_hallucinated_fields_per_record",
-            "total_missing_from_llm_fields",
-            "mean_missing_from_llm_fields_per_record",
-            "total_correct_fields",
-            "mean_correct_fields_per_record",
-            "total_incorrect_fields",
-            "mean_incorrect_fields_per_record"
-        ]
-        plot_metrics_comparison(df_comparison, summary_metrics, "Summary Metrics", "Count/Score", "summary_metrics_comparison")
+            # Field-wise Hallucination (now a stacked bar chart with individual labels)
+            plot_field_wise_hallucination(raw_json_data_for_field_wise, actual_llm_names_loaded)
 
-        print(f"Generated comparison plots for {len(LLM_NAMES)} LLMs.")
-        print("Please check the current directory for the generated .png files.")
+            summary_metrics = [
+                "Total Hallucinated Fields",
+                "Mean Hallucinated Fields / Record",
+                "Total Missing Fields",
+                "Mean Missing Fields / Record",
+                "Total Correct Fields",
+                "Mean Correct Fields / Record",
+                "Total Incorrect Fields",
+                "Mean Incorrect Fields / Record"
+            ]
+            plot_metrics_comparison(df_comparison, summary_metrics, "Summary Metrics", "Count/Score", "summary_metrics_comparison")
+
+            print(f"Generated comparison plots for {len(actual_llm_names_loaded)} LLMs.")
+            print("Please check the current directory for the generated .png files.")

@@ -1,0 +1,10 @@
+{
+  "precision": 0.9421841541755889,
+  "recall": 0.967032967032967,
+  "f1_score": 0.9544468546637743,
+  "hallucination_rate": 0.02569593147751606,
+  "h_f1_score": 0.9299214536874033,
+  "total_correct_fields": 880,
+  "total_incorrect_fields": 30,
+  "total_hallucinated_fields": 24
+}

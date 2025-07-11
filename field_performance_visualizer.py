@@ -100,11 +100,102 @@ class FieldPerformanceVisualizer:
             logger.warning(f"Field '{field_name}' not found in known categorical or text fields for status determination. Defaulting to Neutral.")
             return "Neutral" # This means the field was not handled by the logic above.
 
+    # def generate_field_performance_matrix(self, evaluation_results: Dict[str, Any], output_filename: str = "field_performance_matrix_heatmap.png"):
+    #     """
+    #     Generates a heatmap visualizing the performance of each field across all text files.
+    #     Colors: Green (Correct), Orange (Incorrect), Yellow (Missing), Red (Hallucination).
+    #     Also prints counts for each category.
+    #     """
+    #     detailed_results = evaluation_results.get('detailed_results', [])
+    #     if not detailed_results:
+    #         logger.warning("No detailed results found for field performance matrix. Skipping plot.")
+    #         return
+
+    #     # Extract file names and field names
+    #     file_names = [os.path.basename(d['file_name']) for d in detailed_results]
+    #     field_names = COMPLETENESS_CHECK_FIELDS # Use the comprehensive list of fields
+
+    #     # Create an empty matrix to store numerical indices for colors
+    #     color_to_index = {label: i for i, label in enumerate(self.color_labels)}
+    #     # Initialize with -1, which will not be mapped by the colormap, effectively being transparent if not assigned
+    #     matrix = np.full((len(field_names), len(file_names)), -1, dtype=int)
+
+    #     # Counters for each category
+    #     category_counts = {label: 0 for label in self.color_labels}
+
+    #     for file_idx, record_metrics in enumerate(detailed_results):
+    #         for field_idx, field_name in enumerate(field_names):
+    #             status = self._get_field_status(field_name, record_metrics)
+                
+    #             # Assign status to matrix and increment counter
+    #             if status in color_to_index:
+    #                 matrix[field_idx, file_idx] = color_to_index[status]
+    #                 category_counts[status] += 1
+    #             else:
+    #                 logger.warning(f"Unknown status '{status}' for field '{field_name}' in file '{file_names[file_idx]}'. Skipping.")
+
+    #     # Create a DataFrame for easier plotting with seaborn
+    #     df_matrix = pd.DataFrame(matrix, index=field_names, columns=file_names)
+
+    #     # Filter out rows/columns that might be entirely -1 (unassigned)
+    #     # This ensures the plot only shows fields/files that actually had a status determined.
+    #     df_matrix = df_matrix.loc[(df_matrix != -1).any(axis=1), (df_matrix != -1).any(axis=0)]
+        
+    #     if df_matrix.empty:
+    #         logger.warning("Filtered DataFrame for heatmap is empty. No data to plot.")
+    #         return
+
+    #     # Plotting the heatmap
+    #     # Adjust figure size dynamically based on number of files and fields
+    #     fig_width = max(15, len(df_matrix.columns) * 0.5) # Minimum 15, then scale by files
+    #     fig_height = max(10, len(df_matrix.index) * 0.3) # Minimum 10, then scale by fields
+    #     plt.figure(figsize=(fig_width, fig_height))
+        
+    #     # Create a custom colormap from the defined colors
+    #     cmap = plt.cm.colors.ListedColormap(self.color_map)
+        
+    #     # Adjust bounds for the colormap to match the number of categories
+    #     # Each category gets a unique integer from 0 to len(color_labels)-1
+    #     bounds = np.arange(len(self.color_labels) + 1) - 0.5
+    #     norm = plt.cm.colors.BoundaryNorm(bounds, cmap.N)
+
+    #     ax = sns.heatmap(df_matrix, cmap=cmap, norm=norm,
+    #                      linewidths=.5, linecolor='lightgray',
+    #                      cbar_kws={"ticks": np.arange(len(self.color_labels)), "label": "Status"})
+
+    #     # Manually set colorbar labels
+    #     cbar = ax.collections[0].colorbar
+    #     cbar.set_ticks(np.arange(len(self.color_labels)))
+    #     cbar.set_ticklabels(self.color_labels)
+
+    #     plt.title('Field Performance Matrix: LLM Output vs Ground Truth', fontsize=16)
+    #     plt.xlabel('Text File', fontsize=12)
+    #     plt.ylabel('Field', fontsize=12)
+    #     plt.xticks(rotation=90, fontsize=8)
+    #     plt.yticks(rotation=0, fontsize=8)
+    #     plt.tight_layout()
+        
+    #     save_path = self.output_dir / output_filename
+    #     plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    #     plt.close()
+    #     logger.info(f"Field performance matrix plot saved to {save_path}")
+
+    #     # Print exact counts
+    #     logger.info("\n--- Field Performance Category Counts ---")
+    #     total_cells_processed = sum(category_counts.values())
+    #     if total_cells_processed > 0:
+    #         for category, count in category_counts.items():
+    #             percentage = (count / total_cells_processed) * 100
+    #             logger.info(f"{category}: {count} / {total_cells_processed} ({percentage:.2f}%)")
+    #     else:
+    #         logger.info("No fields were processed to determine status categories.")
+    #     logger.info("---------------------------------------")
+
+
     def generate_field_performance_matrix(self, evaluation_results: Dict[str, Any], output_filename: str = "field_performance_matrix_heatmap.png"):
         """
         Generates a heatmap visualizing the performance of each field across all text files.
-        Colors: Green (Correct), Orange (Incorrect), Yellow (Missing), Red (Hallucination).
-        Also prints counts for each category.
+        Also calculates Precision, Recall, F1, Hallucination Rate, and H-F1.
         """
         detailed_results = evaluation_results.get('detailed_results', [])
         if not detailed_results:
@@ -113,57 +204,38 @@ class FieldPerformanceVisualizer:
 
         # Extract file names and field names
         file_names = [os.path.basename(d['file_name']) for d in detailed_results]
-        field_names = COMPLETENESS_CHECK_FIELDS # Use the comprehensive list of fields
+        field_names = COMPLETENESS_CHECK_FIELDS
 
-        # Create an empty matrix to store numerical indices for colors
         color_to_index = {label: i for i, label in enumerate(self.color_labels)}
-        # Initialize with -1, which will not be mapped by the colormap, effectively being transparent if not assigned
         matrix = np.full((len(field_names), len(file_names)), -1, dtype=int)
-
-        # Counters for each category
         category_counts = {label: 0 for label in self.color_labels}
 
         for file_idx, record_metrics in enumerate(detailed_results):
             for field_idx, field_name in enumerate(field_names):
                 status = self._get_field_status(field_name, record_metrics)
-                
-                # Assign status to matrix and increment counter
                 if status in color_to_index:
                     matrix[field_idx, file_idx] = color_to_index[status]
                     category_counts[status] += 1
                 else:
                     logger.warning(f"Unknown status '{status}' for field '{field_name}' in file '{file_names[file_idx]}'. Skipping.")
 
-        # Create a DataFrame for easier plotting with seaborn
         df_matrix = pd.DataFrame(matrix, index=field_names, columns=file_names)
-
-        # Filter out rows/columns that might be entirely -1 (unassigned)
-        # This ensures the plot only shows fields/files that actually had a status determined.
         df_matrix = df_matrix.loc[(df_matrix != -1).any(axis=1), (df_matrix != -1).any(axis=0)]
-        
         if df_matrix.empty:
             logger.warning("Filtered DataFrame for heatmap is empty. No data to plot.")
             return
 
-        # Plotting the heatmap
-        # Adjust figure size dynamically based on number of files and fields
-        fig_width = max(15, len(df_matrix.columns) * 0.5) # Minimum 15, then scale by files
-        fig_height = max(10, len(df_matrix.index) * 0.3) # Minimum 10, then scale by fields
+        # Plotting
+        fig_width = max(15, len(df_matrix.columns) * 0.5)
+        fig_height = max(10, len(df_matrix.index) * 0.3)
         plt.figure(figsize=(fig_width, fig_height))
-        
-        # Create a custom colormap from the defined colors
         cmap = plt.cm.colors.ListedColormap(self.color_map)
-        
-        # Adjust bounds for the colormap to match the number of categories
-        # Each category gets a unique integer from 0 to len(color_labels)-1
         bounds = np.arange(len(self.color_labels) + 1) - 0.5
         norm = plt.cm.colors.BoundaryNorm(bounds, cmap.N)
 
         ax = sns.heatmap(df_matrix, cmap=cmap, norm=norm,
-                         linewidths=.5, linecolor='lightgray',
-                         cbar_kws={"ticks": np.arange(len(self.color_labels)), "label": "Status"})
-
-        # Manually set colorbar labels
+                        linewidths=.5, linecolor='lightgray',
+                        cbar_kws={"ticks": np.arange(len(self.color_labels)), "label": "Status"})
         cbar = ax.collections[0].colorbar
         cbar.set_ticks(np.arange(len(self.color_labels)))
         cbar.set_ticklabels(self.color_labels)
@@ -174,13 +246,13 @@ class FieldPerformanceVisualizer:
         plt.xticks(rotation=90, fontsize=8)
         plt.yticks(rotation=0, fontsize=8)
         plt.tight_layout()
-        
+
         save_path = self.output_dir / output_filename
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.close()
         logger.info(f"Field performance matrix plot saved to {save_path}")
 
-        # Print exact counts
+        # --- Print standard category counts ---
         logger.info("\n--- Field Performance Category Counts ---")
         total_cells_processed = sum(category_counts.values())
         if total_cells_processed > 0:
@@ -190,6 +262,70 @@ class FieldPerformanceVisualizer:
         else:
             logger.info("No fields were processed to determine status categories.")
         logger.info("---------------------------------------")
+
+        # --- H-F1 Metrics Calculation (using detailed results) ---
+        total_correct = 0
+        total_incorrect = 0
+        total_hallucinated = 0
+        total_fields_predicted = 0
+
+        for record in detailed_results:
+            hallucinated = set(record.get("hallucinated_fields_list", []))
+            missing = set(record.get("missing_from_llm_list", []))
+
+            for field in COMPLETENESS_CHECK_FIELDS:
+                if field in hallucinated:
+                    total_hallucinated += 1
+                    total_fields_predicted += 1
+                elif field in missing:
+                    continue  # Skip missing from GT
+                else:
+                    status = self._get_field_status(field, record)
+                    if status == "Correct":
+                        total_correct += 1
+                    elif status == "Incorrect":
+                        total_incorrect += 1
+                    total_fields_predicted += 1
+
+        total_gt_present = total_correct + total_incorrect
+
+        precision = total_correct / total_fields_predicted if total_fields_predicted > 0 else 0.0
+        recall = total_correct / total_gt_present if total_gt_present > 0 else 0.0
+        f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+        hallucination_rate = total_hallucinated / total_fields_predicted if total_fields_predicted > 0 else 0.0
+        h_f1 = f1 * (1 - hallucination_rate)
+
+        logger.info("\n--- H-F1 Evaluation Summary (calculated from detailed_results) ---")
+        logger.info(f"Total Correct Fields: {total_correct}")
+        logger.info(f"Total Incorrect Fields: {total_incorrect}")
+        logger.info(f"Total Hallucinated Fields: {total_hallucinated}")
+        logger.info(f"Total Predicted Fields (excluding missing): {total_fields_predicted}")
+        logger.info(f"Precision: {precision:.4f}")
+        logger.info(f"Recall: {recall:.4f}")
+        logger.info(f"F1 Score: {f1:.4f}")
+        logger.info(f"Hallucination Rate: {hallucination_rate:.4f} ({hallucination_rate*100:.2f}%)")
+        logger.info(f"🎯 H-F1 Score (Adjusted F1): {h_f1:.4f}")
+        logger.info("------------------------------------------------------------")
+
+        # Save H-F1 metrics to JSON
+        hf1_metrics = {
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1,
+            "hallucination_rate": hallucination_rate,
+            "h_f1_score": h_f1,
+            "total_correct_fields": total_correct,
+            "total_incorrect_fields": total_incorrect,
+            "total_hallucinated_fields": total_hallucinated
+        }
+
+        hf1_path = self.output_dir / "h_f1_metrics.json"
+        with open(hf1_path, "w") as f:
+            import json
+            json.dump(hf1_metrics, f, indent=2)
+        logger.info(f"H-F1 metrics saved to {hf1_path}")
+
+
 
     def generate_color_coded_excel(self, evaluation_results: Dict[str, Any], predictions: List[Any], ground_truth_map: Dict[str, Any], output_excel_filename: str = "field_performance_summary.xlsx"):
         """
